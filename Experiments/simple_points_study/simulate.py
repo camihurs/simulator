@@ -5,11 +5,14 @@ import sys
 from typing import Literal
 
 import numpy as np
-import quaternionic
+import quaternionic #3D mathematics for rotations (rotations of transducers)
 
-from openstb.simulator.plugin import loader
+from openstb.simulator.plugin import loader #choose what type of components to use (trajectory, transducers, signals, etc.)
+# The loader is key: it allows you to choose different implementations of each component (different types of paths, sensors,
+# signals) as if it were a modular system.
+
 #from openstb.simulator.simulation.points import PointSimulation, PointSimulationConfig
-from openstb.simulator.controller.simple_points import SimplePointSimulation
+from openstb.simulator.controller.simple_points import SimplePointSimulation #The main class that runs the simulation
 
 # The local Dask cluster uses the multiprocessing module. This will import this
 # script at the start of each worker process. If the code to configure and start the
@@ -117,18 +120,20 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # filled with randomly placed points at a density of 10 per m^2. The reflectivity is
     # the fraction of incident amplitude that is scattered back to the sonar. The second
     # target is a single point at a given position.
+    # Target 1: Rectangle with many reflective points
+    # Target 2: A single strong point
     config["targets"] = [
         loader.point_targets(
             {
                 "name": "random_point_rectangle",
                 "parameters": {
                     "seed": 10671,
-                    "Dx": 5,
-                    "Dy": 120,
-                    "centre": (5, 75, 10),
-                    "normal": (0, 0, -1),
-                    "point_density": 10,
-                    "reflectivity": 0.06,
+                    "Dx": 5, # 5 meters wide
+                    "Dy": 120, # 120 metros de largo
+                    "centre": (5, 75, 10), # Central position in 3D
+                    "normal": (0, 0, -1), # Point upwards
+                    "point_density": 10, # 10 reflective points per m²
+                    "reflectivity": 0.06, # 6% reflected amplitude
                 },
             }
         ),
@@ -137,7 +142,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
                 "name": "single_point",
                 "parameters": {
                     "position": (5, 40, 10),
-                    "reflectivity": 10,
+                    "reflectivity": 10, # 10x more reflective (very bright)
                 },
             }
         ),
@@ -153,15 +158,17 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
 
     # Apply two distortions: spherical spreading (1/r scaling to the amplitude on
     # each direction) and acoustic attenuation.
+    # 1. Geometric propagation (1/r)
     config["distortion"] = [
         loader.distortion(
             {
                 "name": "geometric_spreading",
                 "parameters": {
-                    "power": 1.0,
+                    "power": 1.0, # Amplitude decreases with distance
                 },
             }
         ),
+        # 2. Acoustic attenuation
         loader.distortion(
             {
                 "name": "anslie_mccolm_attenuation",
@@ -220,8 +227,8 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
         {
             "name": "generic",
             "parameters": {
-                "position": [0, 1.2, 0.3],
-                "orientation": q_transducer,
+                "position": [0, 1.2, 0.3], # 3D Position (x, y, z)
+                "orientation": q_transducer, # Rotation (points to starboard and 15° down)
                 "beampattern": beampattern,
             },
         }
@@ -297,9 +304,9 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # details about the system sampling. The output will be in the complex baseband.
     sim = SimplePointSimulation(
         result_filename="simple_points.zarr",
-        points_per_chunk=1000,
-        sample_rate=30e3,
-        baseband_frequency=110e3,
+        points_per_chunk=1000, # Optimization: Process 1000 points per batch
+        sample_rate=30e3, # Sample at 30 kHz
+        baseband_frequency=110e3, # Converts to baseband at 110 kHz
     )
 
     # And finally, run the simulation. While it is running, you can access the Dask
