@@ -1,204 +1,262 @@
 import numpy as np
-from scipy.special import eval_legendre, spherical_jn, spherical_yn
 import matplotlib.pyplot as plt
-from tqdm import tqdm
-
-#Esta fue la versión que me dio Claude y yo modifiqué.
-#Da el mismo eco del paper. No calcula directamente g(ka),
-#sino que la interpola a partir de la FFT del pulso incidente,
-#Y además compara el eco calculado usando FFT con el método del trapecio.
-
-# Función rect
-def rect(x):
-   return np.where(np.abs(x) <= 0.5, 1, 0)
-
-# Función para calcular f(ka)
-def f_ka(ka_range, theta=np.pi):
-   """
-   Calcula la función de forma f(ka) vectorizada
-   """
-   N_terms = 80
-   f = np.zeros_like(ka_range, dtype=complex)
-   cos_theta = np.cos(theta)
-
-   for n in range(N_terms):
-       j_n = spherical_jn(n, ka_range, True)
-       y_n = spherical_yn(n, ka_range, True)
-       eta_n = np.arctan(j_n / -y_n)
-       f += (2*n + 1) * eval_legendre(n, cos_theta) * np.sin(eta_n) * np.exp(1j*eta_n)
-
-   f = f * (2/ka_range)
-   return -f
-
-# Parámetros principales--------------------------------------------------------------
-k0a = 15.0  # tamaño del pulso en ka
-b = 2       # número de ciclos
-m = 2 * b * np.pi / k0a  # longitud normalizada del pulso
-duration = 2.5  # duración del pulso en tiempo normalizado
-sample_freq = 102.4
-dt = 1/sample_freq
-fftpoints = 8192
+from scipy.special import spherical_jn, spherical_yn, eval_legendre
 
 
+def compute_form_function(ka_values, theta=np.pi):
+    """
+    Compute form function f(ka) for rigid sphere.
 
-# Generar el pulso temporal y su espectro---------------------------------------------
-tau = np.linspace(0, duration, int(duration*sample_freq))
-pi = rect(tau/m - 1/2) * np.sin(k0a*tau)
+    Parameters:
+    - ka_values: array of ka values
+    - theta: scattering angle (π for backscattering)
 
-# Transformada de Fourier para obtener el espectro
-pi_fft = 2 * np.fft.fft(pi, fftpoints) * dt
-freqs = np.fft.fftfreq(fftpoints, dt)
-k = 2 * np.pi * freqs
+    Returns:
+    - f(ka): complex form function
+    """
 
-# Obtener g(ka) solo para ka > 0
-k_positive = k[k >= 0]
-g_k = np.abs(pi_fft[k >= 0])
-phase_g_k = np.angle(pi_fft[k >= 0])
-phase_g_k = np.mod(phase_g_k + 2*np.pi, 2*np.pi)
+    f = np.zeros_like(ka_values, dtype=complex)
+    cos_theta = np.cos(theta)
 
-# Graficar el pulso temporal
-plt.figure(figsize=(12, 6))
-plt.plot(tau, pi, 'b-', linewidth=1.5)
+    for n in range(N_terms):
+        # Derivatives of spherical Bessel functions
+        jn_prime = spherical_jn(n, ka_values, derivative=True)
+        yn_prime = spherical_yn(n, ka_values, derivative=True)
+
+        # Phase shift
+        eta_n = np.arctan(jn_prime / -yn_prime)
+
+        # Legendre polynomial
+        Pn = eval_legendre(n, cos_theta)
+
+        # Add term to sum
+        f += (2*n + 1) * Pn * np.sin(eta_n) * np.exp(1j * eta_n)
+
+    f = f * (2 / ka_values)
+    return -f
+
+
+# ============================================================================
+# STEP 1: Define Physical Parameters
+# ============================================================================
+N_terms = 80  # Number of terms in series (same as your original code)
+
+# Physical constants
+c = 1480.0              # Sound speed [m/s]
+a = 0.25                # Sphere radius [m]
+
+# Signal parameters (from paper: k0a = 15.0, 2 cycles)
+k0a = 15.0
+f0 = k0a * c / (2 * np.pi * a)  # Center frequency [Hz]
+n_cycles = 2
+
+print(f"Center frequency: f0 = {f0:.1f} Hz")
+print(f"Wavelength: λ = {c/f0:.3f} m")
+print(f"Period: T = {1/f0*1e3:.3f} ms")
+print(f"Pulse duration: {n_cycles/f0*1e3:.3f} ms")
+
+
+
+# ============================================================================
+# STEP 2: Generate Incident Signal (time domain)
+# ============================================================================
+
+# Time parameters
+T_pulse = n_cycles / f0          # Pulse duration [s]
+sample_rate = 100 * f0            # Sampling rate [Hz] (100x Nyquist)
+dt = 1 / sample_rate             # Time step [s]
+
+# Create time vector (start at t=0)
+t_max = 3 * T_pulse              # Extended for visualization
+t = np.arange(0, t_max, dt)      # Time vector [s]
+
+# Generate 2-cycle truncated sinusoid
+incident_signal = np.where(t < T_pulse, np.sin(2 * np.pi * f0 * t), 0)
+
+
+# ============================================================================
+# Visualize incident signal
+# ============================================================================
+plt.figure(figsize=(10, 4))
+plt.plot(t * 1e3, incident_signal, 'b-', linewidth=1.5)
+plt.xlabel('Time [ms]')
+plt.ylabel('Amplitude')
+plt.title(f'Incident Signal: {n_cycles}-cycle sinusoid at {f0:.1f} Hz')
 plt.grid(True, alpha=0.3)
-plt.xlabel("τ'")
-plt.ylabel("$p_i(τ')$")
-plt.title("Ideal Incident Pulseform")
-plt.ylim(-1.1, 1.1)
-plt.xlim(-0.5, 2.5)
+plt.xlim(-0.05, t_max*1e3)
 plt.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
-plt.axvline(x=0, color='k', linestyle='-', linewidth=0.5)
 plt.show()
 
-# Graficar el espectro
-plt.figure(figsize=(12, 8))
+print(f"\nSignal generated:")
+print(f"  - Samples: {len(t)}")
+print(f"  - Duration: {t_max*1e3:.2f} ms")
+print(f"  - Sample rate: {sample_rate:.1f} Hz")
 
-# Gráfica de la magnitud
-plt.subplot(2, 1, 1)
-plt.plot(k_positive, g_k, 'b-', linewidth=1.5)
-plt.xlabel("$ka$")
-plt.ylabel("$|g(ka)|$")
-plt.title("Spectrum $g(ka)$ of a 2-cycle pulse with $k_0a = 15.0$")
-plt.grid(True, alpha=0.3)
-plt.xlim(0, 30)
 
-# Gráfica de la fase
-plt.subplot(2, 1, 2)
-plt.plot(k_positive, phase_g_k, 'r-', linewidth=1.5)
-plt.xlabel("$ka$")
-plt.ylabel("Phase of $g(ka)$ (radians)")
-plt.yticks([0, np.pi/2, np.pi, 3*np.pi/2, 2*np.pi],
-         ['0', '$\\pi/2$', '$\\pi$', '$3\\pi/2$', '$2\\pi$'])
-plt.grid(True, alpha=0.3)
-plt.xlim(0, 30)
-plt.ylim(0, 2*np.pi)
+
+# ============================================================================
+# STEP 3: Calculate Spectrum of Incident Signal
+# ============================================================================
+
+# FFT parameters
+n_fft = 16384                     # FFT points (Originally 8192). 16384 is to get a good resolution in the form function.
+freq = np.fft.fftfreq(n_fft, dt) # Frequency vector [Hz]
+
+# Compute FFT
+incident_fft = np.fft.fft(incident_signal, n_fft) * dt  # Scale by dt
+incident_fft *= 2  # Factor of 2 (same as your original code)
+
+# Keep only positive frequencies
+positive_freq_mask = freq >= 0
+freq_positive = freq[positive_freq_mask]
+incident_fft_positive = incident_fft[positive_freq_mask]
+
+# Convert frequency to wavenumber k = 2πf/c
+k_positive = 2 * np.pi * freq_positive / c
+
+# Calculate magnitude and phase
+magnitude = np.abs(incident_fft_positive)
+phase = np.angle(incident_fft_positive)
+phase = np.mod(phase + 2*np.pi, 2*np.pi)  # Wrap to [0, 2π]
+
+
+
+# ============================================================================
+# Visualize spectrum
+# ============================================================================
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+
+# Magnitude vs ka
+ka_positive = k_positive * a
+ax1.plot(ka_positive, magnitude, 'b-', linewidth=1.5)
+ax1.set_xlabel('ka')
+ax1.set_ylabel('|g(ka)|')
+ax1.set_title(f'Spectrum g(ka) of a {n_cycles}-cycle pulse with k₀a = {k0a}')
+ax1.grid(True, alpha=0.3)
+ax1.set_xlim(0, 30)
+
+# Phase vs ka
+ax2.plot(ka_positive, phase, 'r-', linewidth=1.5)
+ax2.set_xlabel('ka')
+ax2.set_ylabel('Phase of g(ka) (radians)')
+ax2.set_yticks([0, np.pi/2, np.pi, 3*np.pi/2, 2*np.pi])
+ax2.set_yticklabels(['0', 'π/2', 'π', '3π/2', '2π'])
+ax2.grid(True, alpha=0.3)
+ax2.set_xlim(0, 30)
+ax2.set_ylim(0, 2*np.pi)
+
 plt.tight_layout()
 plt.show()
 
-# Parámetros para el cálculo del eco---------------------------------------------------
-ka_max = 32*np.pi
-n_points_tau = 500
-tau_range = np.linspace(-3, 8, n_points_tau)
-dka = 0.001 * np.pi
-n_points_ka = int(ka_max/dka)
-ka_range = np.linspace(0.01, ka_max, n_points_ka)
-
-# Calcular f(ka)
-print("Calculando función de forma f(ka)...")
-f_ka_values = f_ka(ka_range)
-
-# Interpolar g(ka) a los puntos necesarios
-g_ka_values = np.interp(ka_range, k_positive, pi_fft[k >= 0].real) + \
-             1j * np.interp(ka_range, k_positive, pi_fft[k >= 0].imag)
-
-
-#Calcular el eco dispersado-------------------------------------------------------------
-# Método 1: Trapecio (original)----------------------------------------------------------------
-print("Calculando pulso dispersado (método trapecio)...")
-scattered_pulse_trap = np.zeros(len(tau_range), dtype=complex)
-
-for i, tau in enumerate(tqdm(tau_range)):
-    integrand = g_ka_values * f_ka_values * np.exp(1j*ka_range*tau)
-    scattered_pulse_trap[i] = np.sum(integrand) * dka
-
-scattered_pulse_trap = np.real(scattered_pulse_trap)
-scattered_pulse_trap = scattered_pulse_trap / np.max(np.abs(scattered_pulse_trap))
-
-
-# Método 2: FFT
-print("Calculando pulso dispersado (método FFT)...")
-product = g_ka_values * f_ka_values  # Producto en el dominio de la frecuencia
-fft_length = len(product)
-
-# IFFT y normalización
-scattered_pulse_fft = np.real(np.fft.ifft(product))
-scattered_pulse_fft = scattered_pulse_fft / np.max(np.abs(scattered_pulse_fft))
-
-# Crear vector de tiempo para la FFT
-dt_fft = 2*np.pi/(fft_length*dka)
-tau_fft_full = np.arange(-fft_length//2, fft_length//2)*dt_fft
-
-# Reorganizar la señal
-scattered_pulse_fft = np.roll(scattered_pulse_fft, fft_length//2)
-
-# Interpolar al mismo espaciado que el método del trapecio
-from scipy.interpolate import interp1d
-f_interp = interp1d(tau_fft_full, scattered_pulse_fft, kind='cubic')
-scattered_pulse_fft = f_interp(tau_range)
-
-scattered_pulse_fft = f_interp(tau_range)
-tau_fft = tau_range
-
-
-# # Método 2: FFT
-# print("Calculando pulso dispersado (método FFT)...")
-# product = g_ka_values * f_ka_values  # Producto en el dominio de la frecuencia
-# fft_length = len(product)  # Usamos el mismo número de puntos que tenemos en product
-
-# # IFFT y normalización
-# scattered_pulse_fft = np.real(np.fft.ifft(product))
-# scattered_pulse_fft = scattered_pulse_fft / np.max(np.abs(scattered_pulse_fft))
-
-# # Crear vector de tiempo para el resultado de la FFT
-# dt_fft = 2*np.pi/(fft_length*dka)  # Paso temporal para la FFT
-# tau_fft = np.arange(-fft_length//2, fft_length//2)*dt_fft
-
-# # Reorganizar la señal para centrarla
-# scattered_pulse_fft = np.roll(scattered_pulse_fft, fft_length//2)
+print(f"\nSpectrum computed:")
+print(f"  - FFT points: {n_fft}")
+print(f"  - Frequency resolution: {freq_positive[1]:.2f} Hz")
+print(f"  - Max frequency: {freq_positive[-1]/1e3:.1f} kHz")
+print(f"  - k₀a value at f₀: {(2*np.pi*f0/c)*a:.2f}")
 
 
 
-# # Imprimir espaciado temporal del método del trapecio
-# dt_trap = (tau_range[-1] - tau_range[0])/n_points_tau
-# print(f"\nEspaciado temporal (Trapecio): {dt_trap:.6f}")
+# ============================================================================
+# STEP 4: Calculate Form Function f(ka)
+# ============================================================================
+# Compute f(ka) for the spectrum range
+f_ka = compute_form_function(ka_positive[1:], theta=np.pi)  # Skip ka=0
+f_ka = np.concatenate([[0], f_ka])  # Add zero at ka=0
 
-# # Imprimir espaciado temporal de la FFT
-# print(f"Espaciado temporal (FFT): {dt_fft:.6f}")
-# print(f"Número de puntos FFT: {len(scattered_pulse_fft)}")
-# print(f"Número de puntos Trapecio: {len(scattered_pulse_trap)}")
+# ============================================================================
+# Visualize form function (magnitude and phase)
+# ============================================================================
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
 
+# Magnitude
+ax1.plot(ka_positive, np.abs(f_ka), 'b-', linewidth=1.5)
+ax1.set_xlabel('ka')
+ax1.set_ylabel('|f(ka)|')
+ax1.set_title('Form Function for Rigid Sphere (Backscattering) - Magnitude')
+ax1.grid(True, alpha=0.3)
+ax1.set_xlim(0, 14)
+ax1.set_ylim(0, 1.5)
 
+# Phase
+phase_f = np.angle(f_ka)
+# Phase (wrap to [0, 2π] like in the paper)
+phase_f = np.mod(phase_f, 2*np.pi)  # Wrap to [0, 2π]
 
-# Graficar comparación
-plt.figure(figsize=(12, 8))
-plt.subplot(211)
-plt.plot(tau_range, scattered_pulse_trap, 'b-', label='Trapezoid', linewidth=1)
-plt.grid(True, linestyle='--', alpha=0.7)
-plt.xlabel('$\\tau$ VALUES', fontsize=12)
-plt.ylabel('$\\Psi(\\tau)$', fontsize=12)
-plt.ylim(-1.1, 1.1)
-plt.xlim(-3, 8)
-plt.title('Scattered Pulse (Trapezoid Method)', fontsize=14)
-plt.legend()
-
-plt.subplot(212)
-plt.plot(tau_fft, scattered_pulse_fft, 'r-', label='FFT', linewidth=1)
-plt.grid(True, linestyle='--', alpha=0.7)
-plt.xlabel('$\\tau$ VALUES', fontsize=12)
-plt.ylabel('$\\Psi(\\tau)$', fontsize=12)
-plt.ylim(-1.1, 1.1)
-plt.xlim(-3, 8)
-plt.title('Scattered Pulse (FFT Method)', fontsize=14)
-plt.legend()
+ax2.plot(ka_positive, phase_f, 'r-', linewidth=1.5)
+ax2.set_xlabel('ka')
+ax2.set_ylabel('arg[f(ka)] (radians)')
+ax2.set_title('Form Function for Rigid Sphere (Backscattering) - Phase')
+ax2.grid(True, alpha=0.3)
+ax2.set_xlim(0, 14)
+ax2.set_ylim(0, 2*np.pi)
+ax2.set_yticks([0, np.pi/2, np.pi, 3*np.pi/2, 2*np.pi])
+ax2.set_yticklabels(['0', 'π/2', 'π', '3π/2', '2π'])
 
 plt.tight_layout()
 plt.show()
+
+print(f"\nForm function computed:")
+print(f"  - Number of terms: {N_terms}")
+print(f"  - Scattering angle: θ = π (backscattering)")
+
+
+# ============================================================================
+# STEP 5: Compute Scattered Echo
+# ============================================================================
+
+# Multiply spectrum with form function (in frequency domain)
+product = incident_fft_positive * f_ka
+
+# Inverse FFT to get scattered pulse in time domain
+scattered_fft_raw = np.fft.ifft(product)
+scattered_pulse = np.real(scattered_fft_raw)
+
+# Normalize
+scattered_pulse = scattered_pulse / np.max(np.abs(scattered_pulse))
+
+# Shift to center the zero frequency component
+scattered_pulse = np.fft.fftshift(scattered_pulse)
+
+# Create proper time axis
+n_samples = len(scattered_pulse)
+dk = ka_positive[1] - ka_positive[0]  # Step in ka
+dt_scattered = 2*np.pi / (n_samples * dk * c / a)  # Time step
+t_scattered = np.arange(-n_samples//2, n_samples//2) * dt_scattered
+
+# Normalized time τ = tc/a (for comparison with paper)
+tau = t_scattered * c / a
+
+# ============================================================================
+# Visualize: Physical units
+# ============================================================================
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+
+# Plot 1: Physical time (seconds)
+ax1.plot(t_scattered * 1e3, scattered_pulse, 'b-', linewidth=1.5)
+ax1.set_xlabel('Time [ms]')
+ax1.set_ylabel('Normalized Amplitude')
+ax1.set_title('Scattered Pulse - Physical Units')
+ax1.grid(True, linestyle='--', alpha=0.7)
+ax1.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
+ax1.set_ylim(-1.1, 1.1)
+
+# Plot 2: Normalized time τ (comparison with paper)
+ax2.plot(tau, scattered_pulse, 'b-', linewidth=1.5)
+ax2.set_xlabel('τ (normalized time: tc/a)')
+ax2.set_ylabel('Ψ(τ) (normalized amplitude)')
+ax2.set_title('Scattered Pulse - Normalized Units (Fig. 6 from Paper)')
+ax2.grid(True, linestyle='--', alpha=0.7)
+ax2.set_xlim(-3, 8)
+ax2.set_ylim(-1.1, 1.1)
+ax2.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
+ax2.axvline(x=0, color='k', linestyle='-', linewidth=0.5)
+
+plt.tight_layout()
+plt.show()
+
+print(f"\nScattered pulse computed:")
+print(f"  - Samples: {len(scattered_pulse)}")
+print(f"  - τ range: [{tau[0]:.2f}, {tau[-1]:.2f}]")
+print(f"  - Physical time range: [{t_scattered[0]*1e3:.2f}, {t_scattered[-1]*1e3:.2f}] ms")
+print(f"  - Expected specular at: τ ≈ -2 (t ≈ {-2*a/c*1e3:.3f} ms)")
+print(f"  - Expected creeping wave at: τ ≈ π (t ≈ {np.pi*a/c*1e3:.3f} ms)")
