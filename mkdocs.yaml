@@ -82,6 +82,7 @@ extra_javascript:
 
 watch:
   - src
+  - mkdocs.yaml
 
 nav:
   - index.md
@@ -97,7 +98,13 @@ nav:
       - Overview: plugins/controller/overview.md
       - plugins/controller/simple_points.md
       - plugins/controller/interface.md
+    - Ping times:
+      - Overview: plugins/ping_times/overview.md
+      - plugins/ping_times/constant_distance.md
+      - plugins/ping_times/constant_interval.md
+      - plugins/ping_times/interface.md
   - Release notes:
+    - release_notes/v0.7.0.md
     - release_notes/v0.6.1.md
     - release_notes/v0.6.0.md
     - release_notes/v0.5.0.md
