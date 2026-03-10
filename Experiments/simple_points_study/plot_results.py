@@ -17,13 +17,13 @@ P = results["pressure"]
 trace = P[14, 2, :]
 plt.figure()
 plt.plot(t, 20 * np.log10(np.abs(trace) / 1e-6))
-plt.title("Middle receiver, ping 14")
+plt.title("Middle receiver (x=0), ping 14")
 plt.xlabel("Time (s)")
 plt.ylabel("Echo strength (SPL)")
 plt.show()
 
-# Or an image of all pings recorded on the first receiver.
-rx = P[:, 0, :]
+# Or an image of all pings recorded on the middle receiver.
+rx = P[:, 2, :]
 plt.figure()
 plt.imshow(
     20 * np.log10(np.abs(rx) / 1e-6),
@@ -36,5 +36,5 @@ plt.imshow(
 plt.colorbar(label="Echo strength (SPL)")
 plt.xlabel("Time (s)")
 plt.ylabel("Ping")
-plt.title("Receiver 0")
+plt.title("Middle receiver (x=0)")
 plt.show()
