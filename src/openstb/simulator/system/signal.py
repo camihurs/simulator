@@ -90,3 +90,71 @@ class LFMChirp(abc.Signal):
             s *= level / current
 
         return s
+
+class SinusoidBurst(abc.Signal):
+    """Truncated sinusoidal burst (fixed-frequency tone burst)."""
+
+    def __init__(
+        self,
+        f0: float,
+        n_cycles: float,
+        amplitude: float = 1.0,
+        initial_phase: float = 0.0,
+    ):
+        """
+        Parameters
+        ----------
+        f0 : float
+            Centre frequency in Hz.
+        n_cycles : float
+            Number of cycles in the burst duration.
+        amplitude : float, default 1.0
+            Linear amplitude scaling.
+        initial_phase : float, default 0.0
+            Initial phase in radians (applied at t=0).
+
+        Notes
+        -----
+        The physical signal you used is sin(2*pi*f0*t) for 0 <= t < T.
+        In the simulator, signals are represented in complex baseband, so this class
+        returns the analytic equivalent of a sine burst:
+            exp(j*(2*pi*(f0 - f_bb)*t + initial_phase - pi/2))
+        within the burst duration, and zero outside.
+        """
+        if f0 <= 0:
+            raise ValueError("f0 must be positive")
+        if n_cycles <= 0:
+            raise ValueError("n_cycles must be positive")
+
+        self.f0 = float(f0)
+        self.n_cycles = float(n_cycles)
+        self.amplitude = float(amplitude)
+        self.initial_phase = float(initial_phase)
+        self._duration = self.n_cycles / self.f0
+
+    @property
+    def duration(self) -> float:
+        return self._duration
+
+    @property
+    def minimum_frequency(self) -> float:
+        return self.f0
+
+    @property
+    def maximum_frequency(self) -> float:
+        return self.f0
+
+    def sample(self, t: ArrayLike, baseband_frequency: float) -> np.ndarray:
+        t = np.asarray(t)
+        s = np.zeros_like(t, dtype=complex)
+
+        # Match your script's truncation rule: active only while t < T_pulse.
+        valid = (t >= 0) & (t < self._duration)
+        tv = t[valid]
+
+        # Analytic sine in baseband (sine = cosine shifted by -pi/2).
+        fd = self.f0 - baseband_frequency
+        phase = 2 * np.pi * fd * tv + self.initial_phase - (np.pi / 2)
+        s[valid] = self.amplitude * np.exp(1j * phase)
+
+        return s
