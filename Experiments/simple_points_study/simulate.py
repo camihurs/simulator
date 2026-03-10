@@ -170,23 +170,66 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
         ),
     ]
 
+    # Quick switch between original chirp and new sinusoid burst.
+    signal_mode = "sine"  # "sine" or "lfm"
+
     # Define the signal the sonar will transmit; a Tukey-windowed LFM upchirp here.
-    signal = loader.signal(
-        {
-            "name": "lfm_chirp",
-            "parameters": {
-                "f_start": 100e3,
-                "f_stop": 120e3,
-                "duration": 0.015,
-                "rms_spl": 190,
-                "rms_after_window": True,
-                "window": {
-                    "name": "tukey",
-                    "parameters": {"alpha": 0.2},
+    if signal_mode == "lfm":
+        # Original configuration: Tukey-windowed LFM chirp.
+        signal = loader.signal(
+            {
+                "name": "lfm_chirp",
+                "parameters": {
+                    "f_start": 100e3,
+                    "f_stop": 120e3,
+                    "duration": 0.015,
+                    "rms_spl": 190,
+                    "rms_after_window": True,
+                    "window": {
+                        "name": "tukey",
+                        "parameters": {"alpha": 0.2},
+                    },
                 },
-            },
-        }
-    )
+            }
+        )
+
+    elif signal_mode == "sine":
+        # Parameters aligned with your RigidSphereEcho setup.
+        c = 1480.0
+        a = 0.25
+        k0a = 15.0
+        f0 = k0a * c / (2 * np.pi * a)
+
+        signal = loader.signal(
+            {
+                "name": "SinusoidBurst:openstb.simulator.system.signal",
+                "parameters": {
+                    "f0": f0,
+                    "n_cycles": 2,
+                    "amplitude": 1.0,
+                    "initial_phase": 0.0,
+                },
+            }
+        )
+
+    else:
+        raise ValueError(f"Unknown signal_mode '{signal_mode}'")
+    # signal = loader.signal(
+    #     {
+    #         "name": "lfm_chirp",
+    #         "parameters": {
+    #             "f_start": 100e3,
+    #             "f_stop": 120e3,
+    #             "duration": 0.015,
+    #             "rms_spl": 190,
+    #             "rms_after_window": True,
+    #             "window": {
+    #                 "name": "tukey",
+    #                 "parameters": {"alpha": 0.2},
+    #             },
+    #         },
+    #     }
+    # )
 
     # Set the desired orientation of the transducers. Without rotation, the normal of
     # the transducer, i.e., the direction it is pointing, is [1, 0, 0] (x is forward, y
