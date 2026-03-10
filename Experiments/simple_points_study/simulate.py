@@ -39,6 +39,9 @@ SIM_PARAMS = {
         "amplitude": 1.0,
         "initial_phase": 0.0,
     },
+    "debug": {
+        "plot_incident": True,
+    },
 }
 
 def simulate(cluster: Literal["local"] | Literal["mpi"]):
@@ -137,20 +140,20 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # the fraction of incident amplitude that is scattered back to the sonar. The second
     # target is a single point at a given position.
     config["targets"] = [
-        loader.point_targets(
-            {
-                "name": "random_point_rectangle",
-                "parameters": {
-                    "seed": 10671,
-                    "Dx": 5,
-                    "Dy": 120,
-                    "centre": (5, 75, 10),
-                    "normal": (0, 0, -1),
-                    "point_density": 10,
-                    "reflectivity": 0.06,
-                },
-            }
-        ),
+        # loader.point_targets(
+        #     {
+        #         "name": "random_point_rectangle",
+        #         "parameters": {
+        #             "seed": 10671,
+        #             "Dx": 5,
+        #             "Dy": 120,
+        #             "centre": (5, 75, 10),
+        #             "normal": (0, 0, -1),
+        #             "point_density": 10,
+        #             "reflectivity": 0.06,
+        #         },
+        #     }
+        # ),
         loader.point_targets(
             {
                 "name": "single_point",
@@ -189,6 +192,16 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
                 },
             }
         ),
+        loader.distortion(
+        {
+            "name": "RigidSphereFormFunction:openstb.simulator.distortion.rigid_sphere",
+            "parameters": {
+                "radius_m": SIM_PARAMS["rigid_sphere"]["radius_m"],
+                "n_terms": 80,
+                "scale": 1.0,
+            },
+        }
+    )
     ]
 
     # Quick switch between original chirp and new sinusoid burst.
@@ -235,6 +248,38 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
 
     else:
         raise ValueError(f"Unknown signal_mode '{signal_mode}'")
+
+
+    if SIM_PARAMS["debug"]["plot_incident"]:
+        import matplotlib.pyplot as plt
+
+        # Plot solo de diagnóstico (no cambia la simulación real)
+        if signal_mode == "sine":
+            # Para que se vea igual que en RigidSphereEcho: alta resolución + pasabanda
+            sample_rate_plot = 100.0 * f0
+            baseband_frequency_plot = 0.0
+            title = f"Incident Signal: {SIM_PARAMS['signal']['n_cycles']}-cycle sinusoid at {f0:.1f} Hz"
+        else:
+            # Para otras señales, usar una vista razonable por defecto
+            sample_rate_plot = 10.0 * 30e3
+            baseband_frequency_plot = 110e3
+            title = f"Incident signal ({signal_mode})"
+
+        t_end = 3.0 * signal.duration
+        t = np.arange(0.0, t_end, 1.0 / sample_rate_plot)
+        s = signal.sample(t, baseband_frequency_plot)
+
+        plt.figure(figsize=(10, 4))
+        plt.plot(t * 1e3, np.real(s), "b-", linewidth=1.5)
+        plt.xlabel("Time [ms]")
+        plt.ylabel("Amplitude")
+        plt.title(title)
+        plt.grid(True, alpha=0.3)
+        plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
+        plt.xlim(-0.05, t_end * 1e3)
+        plt.tight_layout()
+        plt.show()
+
     # signal = loader.signal(
     #     {
     #         "name": "lfm_chirp",
