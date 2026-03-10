@@ -20,6 +20,27 @@ from openstb.simulator.plugin import loader
 # therefefore Dask local clusters.
 
 
+# ============================================================================
+# Experiment Parameters (single source of truth for this script)
+# ============================================================================
+SIM_PARAMS = {
+    "environment": {
+        "salinity": 14.5,
+        "sound_speed_ms": 1480.0,
+        "temperature_c": 11.2,
+    },
+    "rigid_sphere": {
+        "radius_m": 0.25,
+        "k0a": 15.0,
+    },
+    "signal": {
+        "mode": "sine",   # "sine" or "lfm"
+        "n_cycles": 2,
+        "amplitude": 1.0,
+        "initial_phase": 0.0,
+    },
+}
+
 def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # Begin our configuration dictionary.
     config: simple_points.SimplePointConfig = {}
@@ -103,9 +124,9 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
         {
             "name": "invariant",
             "parameters": {
-                "salinity": 14.5,
-                "sound_speed": 1480.0,
-                "temperature": 11.2,
+                "salinity": SIM_PARAMS["environment"]["salinity"],
+                "sound_speed": SIM_PARAMS["environment"]["sound_speed_ms"],
+                "temperature": SIM_PARAMS["environment"]["temperature_c"],
             },
         }
     )
@@ -171,7 +192,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     ]
 
     # Quick switch between original chirp and new sinusoid burst.
-    signal_mode = "sine"  # "sine" or "lfm"
+    signal_mode = SIM_PARAMS["signal"]["mode"]  # "sine" or "lfm"
 
     # Define the signal the sonar will transmit; a Tukey-windowed LFM upchirp here.
     if signal_mode == "lfm":
@@ -195,9 +216,9 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
 
     elif signal_mode == "sine":
         # Parameters aligned with your RigidSphereEcho setup.
-        c = 1480.0
-        a = 0.25
-        k0a = 15.0
+        c = SIM_PARAMS["environment"]["sound_speed_ms"]
+        a = SIM_PARAMS["rigid_sphere"]["radius_m"]
+        k0a = SIM_PARAMS["rigid_sphere"]["k0a"]
         f0 = k0a * c / (2 * np.pi * a)
 
         signal = loader.signal(
@@ -205,9 +226,9 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
                 "name": "SinusoidBurst:openstb.simulator.system.signal",
                 "parameters": {
                     "f0": f0,
-                    "n_cycles": 2,
-                    "amplitude": 1.0,
-                    "initial_phase": 0.0,
+                    "n_cycles": SIM_PARAMS["signal"]["n_cycles"],
+                    "amplitude": SIM_PARAMS["signal"]["amplitude"],
+                    "initial_phase": SIM_PARAMS["signal"]["initial_phase"],
                 },
             }
         )
