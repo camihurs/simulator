@@ -41,6 +41,8 @@ SIM_PARAMS = {
     },
     "debug": {
         "plot_incident": True,
+        "plot_incident_spectrum": True,
+        "incident_fft_points": 16384,
     },
 }
 
@@ -279,6 +281,49 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
         plt.xlim(-0.05, t_end * 1e3)
         plt.tight_layout()
         plt.show()
+
+        if SIM_PARAMS["debug"].get("plot_incident_spectrum", False):
+            # Espectro de la señal incidente (igual enfoque que RigidSphereEcho)
+            n_fft = int(SIM_PARAMS["debug"].get("incident_fft_points", 16384))
+            dt_plot = 1.0 / sample_rate_plot
+
+            incident_fft = np.fft.fft(np.real(s), n_fft) * dt_plot
+            incident_fft *= 2.0
+
+            freq = np.fft.fftfreq(n_fft, dt_plot)
+            positive = freq >= 0
+            freq_positive = freq[positive]
+            incident_fft_positive = incident_fft[positive]
+
+            # ka usando el mismo c del experimento
+            c_plot = SIM_PARAMS["environment"]["sound_speed_ms"]
+            k_positive = 2.0 * np.pi * freq_positive / c_plot
+            ka_positive = k_positive * SIM_PARAMS["rigid_sphere"]["radius_m"]
+
+            magnitude = np.abs(incident_fft_positive)
+            phase = np.angle(incident_fft_positive)
+            phase = np.mod(phase + 2.0 * np.pi, 2.0 * np.pi)
+
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+
+            ax1.plot(ka_positive, magnitude, "b-", linewidth=1.5)
+            ax1.set_xlabel("ka")
+            ax1.set_ylabel("|g(ka)|")
+            ax1.set_title("Incident spectrum g(ka) - magnitude")
+            ax1.grid(True, alpha=0.3)
+            ax1.set_xlim(0, 30)
+
+            ax2.plot(ka_positive, phase, "r-", linewidth=1.5)
+            ax2.set_xlabel("ka")
+            ax2.set_ylabel("Phase of g(ka) (radians)")
+            ax2.set_yticks([0, np.pi/2, np.pi, 3*np.pi/2, 2*np.pi])
+            ax2.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
+            ax2.grid(True, alpha=0.3)
+            ax2.set_xlim(0, 30)
+            ax2.set_ylim(0, 2*np.pi)
+
+            plt.tight_layout()
+            plt.show()
 
     # signal = loader.signal(
     #     {
