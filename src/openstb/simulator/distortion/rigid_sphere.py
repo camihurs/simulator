@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause-Patent
 
 import numpy as np
+from pathlib import Path
 from numpy.typing import ArrayLike
 from scipy.special import eval_legendre, spherical_jn, spherical_yn
 
@@ -17,8 +18,9 @@ class RigidSphereFormFunction(Distortion):
         n_terms: int = 80,
         scale: float = 1.0,
         ka_eps: float = 1e-8,
-
-    ):
+        debug_dump: bool = False,
+        debug_dump_path: str = "rigid_sphere_ff_debug.npz",
+):
         if radius_m <= 0:
             raise ValueError("radius_m must be positive")
         if n_terms < 0:
@@ -31,7 +33,9 @@ class RigidSphereFormFunction(Distortion):
         self.scale = float(scale)
         self.ka_eps = float(ka_eps)
         self._calls = 0
-
+        self.debug_dump = bool(debug_dump)
+        self.debug_dump_path = debug_dump_path
+        self._debug_dumped = False
 
     def _form_function(self, ka: np.ndarray, cos_theta: np.ndarray) -> np.ndarray:
         """
@@ -49,17 +53,22 @@ class RigidSphereFormFunction(Distortion):
 
         ff = np.zeros((Nr, Nf, Nt), dtype=np.complex128)
 
-        for n in range(self.n_terms + 1):
+        # Igual que en RigidSphereEcho: n = 0..N_terms-1
+        for n in range(self.n_terms):
             jnp = spherical_jn(n, ka, derivative=True)
             ynp = spherical_yn(n, ka, derivative=True)
-            denom = jnp + 1j * ynp
 
-            coeff_n = (2 * n + 1) * (jnp / denom)  # (Nf,)
-            Pn = eval_legendre(n, cos_theta)       # (Nr, Nt)
+            # Igual a tu script: eta_n = arctan(jn_prime / -yn_prime)
+            eta_n = np.arctan(jnp / -ynp)
+
+            # Coeficiente complejo de la serie
+            coeff_n = (2 * n + 1) * np.sin(eta_n) * np.exp(1j * eta_n)  # (Nf,)
+            Pn = eval_legendre(n, cos_theta)  # (Nr, Nt)
 
             ff += coeff_n[np.newaxis, :, np.newaxis] * Pn[:, np.newaxis, :]
 
-        ff *= (-1j / np.maximum(ka, self.ka_eps))[np.newaxis, :, np.newaxis]
+        # Mismo factor global que en RigidSphereEcho: return -(2/ka)*sum(...)
+        ff *= (-2.0 / np.maximum(ka, self.ka_eps))[np.newaxis, :, np.newaxis]
         return ff
 
     def apply(
@@ -103,6 +112,31 @@ class RigidSphereFormFunction(Distortion):
         cos_theta = np.clip(cos_theta, -1.0, 1.0)
 
         ff = self._form_function(ka, cos_theta)  # (Nr, Nf, Nt)
+
+        if self.debug_dump and (not self._debug_dumped):
+            try:
+                out_path = Path(self.debug_dump_path)
+
+                # Tomamos una traza representativa: receiver 0, target 0
+                ff_line = ff[0, :, 0]
+                theta_sample = float(np.arccos(np.clip(cos_theta[0, 0], -1.0, 1.0)))
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+
+                np.savez(
+                    out_path,
+                    ka=ka,
+                    ff_complex=ff_line,
+                    ff_magnitude=np.abs(ff_line),
+                    ff_phase=np.mod(np.angle(ff_line), 2.0 * np.pi),
+                    theta_sample_rad=theta_sample,
+                    radius_m=self.radius_m,
+                    n_terms=self.n_terms,
+                    scale=self.scale,
+                )
+                print(f"RigidSphere debug dump saved: {out_path}")
+                self._debug_dumped = True
+            except Exception as e:
+                print(f"RigidSphere debug dump failed: {e}")
 
         print("RigidSphere out:", np.shape(S_arr), np.shape(ff))
         return S_arr * (self.scale * ff)

@@ -23,7 +23,7 @@ plt.ylabel("Echo strength (SPL)")
 plt.show()
 
 # Or an image of all pings recorded on the middle receiver.
-rx = P[:, 2, :]
+rx = P[:, 0, :]
 plt.figure()
 plt.imshow(
     20 * np.log10(np.abs(rx) / 1e-6),

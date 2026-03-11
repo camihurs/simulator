@@ -9,6 +9,7 @@ import quaternionic
 
 from openstb.simulator.controller import simple_points
 from openstb.simulator.plugin import loader
+from pathlib import Path
 
 # The local Dask cluster uses the multiprocessing module. This will import this
 # script at the start of each worker process. If the code to configure and start the
@@ -43,6 +44,12 @@ SIM_PARAMS = {
         "plot_incident": True,
         "plot_incident_spectrum": True,
         "incident_fft_points": 16384,
+        "plot_form_function": True,
+        "form_function_ka_max": 14,
+        "form_function_points": 2000,
+        "dump_form_function_from_plugin": True,
+        "plugin_dump_path": str(Path(__file__).resolve().parent / "rigid_sphere_ff_debug.npz"),
+        "plot_form_function_from_plugin_dump": True,
     },
 }
 
@@ -201,6 +208,8 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
                 "radius_m": SIM_PARAMS["rigid_sphere"]["radius_m"],
                 "n_terms": 80,
                 "scale": 1.0,
+                "debug_dump": SIM_PARAMS["debug"]["dump_form_function_from_plugin"],
+                "debug_dump_path": SIM_PARAMS["debug"]["plugin_dump_path"],
             },
         }
     )
@@ -212,6 +221,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # Define the signal the sonar will transmit; a Tukey-windowed LFM upchirp here.
     if signal_mode == "lfm":
         # Original configuration: Tukey-windowed LFM chirp.
+        sim_baseband_frequency = 110e3
         signal = loader.signal(
             {
                 "name": "lfm_chirp",
@@ -236,6 +246,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
         k0a = SIM_PARAMS["rigid_sphere"]["k0a"]
         f0 = k0a * c / (2 * np.pi * a)
 
+        sim_baseband_frequency = 0.0
         signal = loader.signal(
             {
                 "name": "SinusoidBurst:openstb.simulator.system.signal",
@@ -393,7 +404,8 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
                 },
             }
         )
-        for x in [-0.1, -0.05, 0, 0.05, 0.1]
+        #for x in [-0.1, -0.05, 0, 0.05, 0.1]
+        for x in [0]
     ]
 
     # Combine all this into a System plugin.
@@ -450,13 +462,50 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
         result_filename="simple_points.zarr",
         points_per_chunk=1000,
         sample_rate=30e3,
-        baseband_frequency=110e3,
+        baseband_frequency=sim_baseband_frequency,
     )
 
     # And finally, run the simulation. While it is running, you can access the Dask
     # dashboard at 127.0.0.1:8787 to see various diagnostic plots about how the cluster
     # is being utilised.
     sim.run(config)
+
+    if SIM_PARAMS["debug"].get("plot_form_function_from_plugin_dump", False):
+        import matplotlib.pyplot as plt
+        from pathlib import Path
+
+        dump_path = Path(SIM_PARAMS["debug"]["plugin_dump_path"])
+        if dump_path.exists():
+            data = np.load(dump_path)
+            ka_dump = data["ka"]
+            mag_dump = data["ff_magnitude"]
+            phase_dump = data["ff_phase"]
+            theta_sample = float(data["theta_sample_rad"])
+
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+
+            ax1.plot(ka_dump, mag_dump, "b-", linewidth=1.5)
+            ax1.set_xlabel("ka")
+            ax1.set_ylabel("|f(ka)|")
+            ax1.set_title("Form Function from plugin dump - Magnitude")
+            ax1.grid(True, alpha=0.3)
+            ax1.set_xlim(0, 14)
+            ax1.set_ylim(0, 1.5)
+
+            ax2.plot(ka_dump, phase_dump, "r-", linewidth=1.5)
+            ax2.set_xlabel("ka")
+            ax2.set_ylabel("arg[f(ka)] (radians)")
+            ax2.set_title(f"Form Function from plugin dump - Phase (theta={theta_sample:.4f} rad)")
+            ax2.grid(True, alpha=0.3)
+            ax2.set_xlim(0, 14)
+            ax2.set_ylim(0, 2 * np.pi)
+            ax2.set_yticks([0, np.pi/2, np.pi, 3*np.pi/2, 2*np.pi])
+            ax2.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
+
+            plt.tight_layout()
+            plt.show()
+        else:
+            print(f"Plugin dump not found: {dump_path}")
 
 
 if __name__ == "__main__":
