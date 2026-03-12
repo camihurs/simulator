@@ -14,7 +14,7 @@ P = results["pressure"]
 # As an example, plot the trace from the middle receiver at ping 14 as sound pressure
 # level (dB relative to 1uPa). The results have the dimensions ping, receiver, time
 # (which is stored in a pressure_dimensions array in the results).
-trace = P[14, 2, :]
+trace = P[14, 0, :]
 plt.figure()
 plt.plot(t, 20 * np.log10(np.abs(trace) / 1e-6))
 plt.title("Middle receiver (x=0), ping 14")

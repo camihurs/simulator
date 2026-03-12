@@ -33,6 +33,9 @@ SIM_PARAMS = {
     "rigid_sphere": {
         "radius_m": 0.25,
         "k0a": 15.0,
+        "n_terms": 80,
+        "scale": 1.0,
+        "ka_eps": 1e-8,
     },
     "signal": {
         "mode": "sine",   # "sine" or "lfm"
@@ -206,8 +209,9 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
             "name": "RigidSphereFormFunction:openstb.simulator.distortion.rigid_sphere",
             "parameters": {
                 "radius_m": SIM_PARAMS["rigid_sphere"]["radius_m"],
-                "n_terms": 80,
-                "scale": 1.0,
+                "n_terms": SIM_PARAMS["rigid_sphere"]["n_terms"],
+                "scale": SIM_PARAMS["rigid_sphere"]["scale"],
+                "ka_eps": SIM_PARAMS["rigid_sphere"]["ka_eps"],
                 "debug_dump": SIM_PARAMS["debug"]["dump_form_function_from_plugin"],
                 "debug_dump_path": SIM_PARAMS["debug"]["plugin_dump_path"],
             },
@@ -263,95 +267,25 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
         raise ValueError(f"Unknown signal_mode '{signal_mode}'")
 
 
-    if SIM_PARAMS["debug"]["plot_incident"]:
-        import matplotlib.pyplot as plt
+    # if SIM_PARAMS["debug"]["plot_incident"]:
+    #     import matplotlib.pyplot as plt
 
-        # Plot solo de diagnóstico (no cambia la simulación real)
-        if signal_mode == "sine":
-            # Para que se vea igual que en RigidSphereEcho: alta resolución + pasabanda
-            sample_rate_plot = 100.0 * f0
-            baseband_frequency_plot = 0.0
-            title = f"Incident Signal: {SIM_PARAMS['signal']['n_cycles']}-cycle sinusoid at {f0:.1f} Hz"
-        else:
-            # Para otras señales, usar una vista razonable por defecto
-            sample_rate_plot = 10.0 * 30e3
-            baseband_frequency_plot = 110e3
-            title = f"Incident signal ({signal_mode})"
+    #     # Plot solo de diagnóstico (no cambia la simulación real)
+    #     if signal_mode == "sine":
+    #         # Para que se vea igual que en RigidSphereEcho: alta resolución + pasabanda
+    #         sample_rate_plot = 100.0 * f0
+    #         baseband_frequency_plot = 0.0
+    #         title = f"Incident Signal: {SIM_PARAMS['signal']['n_cycles']}-cycle sinusoid at {f0:.1f} Hz"
+    #     else:
+    #         # Para otras señales, usar una vista razonable por defecto
+    #         sample_rate_plot = 10.0 * 30e3
+    #         baseband_frequency_plot = 110e3
+    #         title = f"Incident signal ({signal_mode})"
 
-        t_end = 3.0 * signal.duration
-        t = np.arange(0.0, t_end, 1.0 / sample_rate_plot)
-        s = signal.sample(t, baseband_frequency_plot)
+        #t_end = 3.0 * signal.duration
+        #t = np.arange(0.0, t_end, 1.0 / sample_rate_plot)
+        #s = signal.sample(t, baseband_frequency_plot)
 
-        # plt.figure(figsize=(10, 4))
-        # plt.plot(t * 1e3, np.real(s), "b-", linewidth=1.5)
-        # plt.xlabel("Time [ms]")
-        # plt.ylabel("Amplitude")
-        # plt.title(title)
-        # plt.grid(True, alpha=0.3)
-        # plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
-        # plt.xlim(-0.05, t_end * 1e3)
-        # plt.tight_layout()
-        # plt.show()
-
-        # if SIM_PARAMS["debug"].get("plot_incident_spectrum", False):
-        #     # Espectro de la señal incidente (igual enfoque que RigidSphereEcho)
-        #     n_fft = int(SIM_PARAMS["debug"].get("incident_fft_points", 16384))
-        #     dt_plot = 1.0 / sample_rate_plot
-
-        #     incident_fft = np.fft.fft(np.real(s), n_fft) * dt_plot
-        #     incident_fft *= 2.0
-
-        #     freq = np.fft.fftfreq(n_fft, dt_plot)
-        #     positive = freq >= 0
-        #     freq_positive = freq[positive]
-        #     incident_fft_positive = incident_fft[positive]
-
-        #     # ka usando el mismo c del experimento
-        #     c_plot = SIM_PARAMS["environment"]["sound_speed_ms"]
-        #     k_positive = 2.0 * np.pi * freq_positive / c_plot
-        #     ka_positive = k_positive * SIM_PARAMS["rigid_sphere"]["radius_m"]
-
-        #     magnitude = np.abs(incident_fft_positive)
-        #     phase = np.angle(incident_fft_positive)
-        #     phase = np.mod(phase + 2.0 * np.pi, 2.0 * np.pi)
-
-        #     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
-
-        #     ax1.plot(ka_positive, magnitude, "b-", linewidth=1.5)
-        #     ax1.set_xlabel("ka")
-        #     ax1.set_ylabel("|g(ka)|")
-        #     ax1.set_title("Incident spectrum g(ka) - magnitude")
-        #     ax1.grid(True, alpha=0.3)
-        #     ax1.set_xlim(0, 30)
-
-        #     ax2.plot(ka_positive, phase, "r-", linewidth=1.5)
-        #     ax2.set_xlabel("ka")
-        #     ax2.set_ylabel("Phase of g(ka) (radians)")
-        #     ax2.set_yticks([0, np.pi/2, np.pi, 3*np.pi/2, 2*np.pi])
-        #     ax2.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
-        #     ax2.grid(True, alpha=0.3)
-        #     ax2.set_xlim(0, 30)
-        #     ax2.set_ylim(0, 2*np.pi)
-
-        #     plt.tight_layout()
-        #     plt.show()
-
-    # signal = loader.signal(
-    #     {
-    #         "name": "lfm_chirp",
-    #         "parameters": {
-    #             "f_start": 100e3,
-    #             "f_stop": 120e3,
-    #             "duration": 0.015,
-    #             "rms_spl": 190,
-    #             "rms_after_window": True,
-    #             "window": {
-    #                 "name": "tukey",
-    #                 "parameters": {"alpha": 0.2},
-    #             },
-    #         },
-    #     }
-    # )
 
     # Set the desired orientation of the transducers. Without rotation, the normal of
     # the transducer, i.e., the direction it is pointing, is [1, 0, 0] (x is forward, y
@@ -469,43 +403,6 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # dashboard at 127.0.0.1:8787 to see various diagnostic plots about how the cluster
     # is being utilised.
     sim.run(config)
-
-    # if SIM_PARAMS["debug"].get("plot_form_function_from_plugin_dump", False):
-    #     import matplotlib.pyplot as plt
-    #     from pathlib import Path
-
-    #     dump_path = Path(SIM_PARAMS["debug"]["plugin_dump_path"])
-    #     if dump_path.exists():
-    #         data = np.load(dump_path)
-    #         ka_dump = data["ka"]
-    #         mag_dump = data["ff_magnitude"]
-    #         phase_dump = data["ff_phase"]
-    #         theta_sample = float(data["theta_sample_rad"])
-
-    #         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
-
-    #         ax1.plot(ka_dump, mag_dump, "b-", linewidth=1.5)
-    #         ax1.set_xlabel("ka")
-    #         ax1.set_ylabel("|f(ka)|")
-    #         ax1.set_title("Form Function from plugin dump - Magnitude")
-    #         ax1.grid(True, alpha=0.3)
-    #         ax1.set_xlim(0, 14)
-    #         ax1.set_ylim(0, 1.5)
-
-    #         ax2.plot(ka_dump, phase_dump, "r-", linewidth=1.5)
-    #         ax2.set_xlabel("ka")
-    #         ax2.set_ylabel("arg[f(ka)] (radians)")
-    #         ax2.set_title(f"Form Function from plugin dump - Phase (theta={theta_sample:.4f} rad)")
-    #         ax2.grid(True, alpha=0.3)
-    #         ax2.set_xlim(0, 14)
-    #         ax2.set_ylim(0, 2 * np.pi)
-    #         ax2.set_yticks([0, np.pi/2, np.pi, 3*np.pi/2, 2*np.pi])
-    #         ax2.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
-
-    #         plt.tight_layout()
-    #         plt.show()
-    #     else:
-    #         print(f"Plugin dump not found: {dump_path}")
 
 
 if __name__ == "__main__":
