@@ -37,6 +37,47 @@ class RigidSphereFormFunction(Distortion):
         self.debug_dump_path = debug_dump_path
         self._debug_dumped = False
 
+# Me falta probar esta versión a ver si se arregla lo de plot_results
+    # def _form_function(self, ka: np.ndarray, cos_theta: np.ndarray) -> np.ndarray:
+    #     """
+    #     Parameters
+    #     ----------
+    #     ka : (Nf,) array
+    #     cos_theta : (Nr, Nt) array
+
+    #     Returns
+    #     -------
+    #     ff : (Nr, Nf, Nt) complex array
+    #     """
+    #     Nr, Nt = cos_theta.shape
+    #     Nf = ka.size
+
+    #     ff = np.zeros((Nr, Nf, Nt), dtype=np.complex128)
+
+    #     # Avoid singular/unstable values exactly at ka=0.
+    #     ka_safe = np.maximum(ka, self.ka_eps)
+
+    #     # Igual que en RigidSphereEcho: n = 0..N_terms-1
+    #     for n in range(self.n_terms):
+    #         jnp = spherical_jn(n, ka_safe, derivative=True)
+    #         ynp = spherical_yn(n, ka_safe, derivative=True)
+
+    #         # Numerically robust equivalent of arctan(jnp / -ynp).
+    #         eta_n = np.arctan2(jnp, -ynp)
+    #         eta_n = np.nan_to_num(eta_n, nan=0.0)
+
+    #         # Coeficiente complejo de la serie
+    #         coeff_n = (2 * n + 1) * np.sin(eta_n) * np.exp(1j * eta_n)  # (Nf,)
+    #         coeff_n = np.nan_to_num(coeff_n, nan=0.0 + 0.0j)
+
+    #         Pn = eval_legendre(n, cos_theta)  # (Nr, Nt)
+    #         ff += coeff_n[np.newaxis, :, np.newaxis] * Pn[:, np.newaxis, :]
+
+    #     # Mismo factor global que en RigidSphereEcho: return -(2/ka)*sum(...)
+    #     ff *= (-2.0 / ka_safe)[np.newaxis, :, np.newaxis]
+    #     ff = np.nan_to_num(ff, nan=0.0 + 0.0j)
+    # return ff
+
     def _form_function(self, ka: np.ndarray, cos_theta: np.ndarray) -> np.ndarray:
         """
         Parameters

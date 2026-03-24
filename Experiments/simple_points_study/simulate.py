@@ -10,6 +10,8 @@ import quaternionic
 from openstb.simulator.controller import simple_points
 from openstb.simulator.plugin import loader
 from pathlib import Path
+from shared_params import SIM_PARAMS
+from signal_factory import build_signal_from_params
 
 # The local Dask cluster uses the multiprocessing module. This will import this
 # script at the start of each worker process. If the code to configure and start the
@@ -24,37 +26,37 @@ from pathlib import Path
 # ============================================================================
 # Experiment Parameters (single source of truth for this script)
 # ============================================================================
-SIM_PARAMS = {
-    "environment": {
-        "salinity": 14.5,
-        "sound_speed_ms": 1480.0,
-        "temperature_c": 11.2,
-    },
-    "rigid_sphere": {
-        "radius_m": 0.25,
-        "k0a": 15.0,
-        "n_terms": 80,
-        "scale": 1.0,
-        "ka_eps": 1e-8,
-    },
-    "signal": {
-        "mode": "sine",   # "sine" or "lfm"
-        "n_cycles": 2,
-        "amplitude": 1.0,
-        "initial_phase": 0.0,
-    },
-    "debug": {
-        "plot_incident": True,
-        "plot_incident_spectrum": True,
-        "incident_fft_points": 16384,
-        "plot_form_function": True,
-        "form_function_ka_max": 14,
-        "form_function_points": 2000,
-        "dump_form_function_from_plugin": True,
-        "plugin_dump_path": str(Path(__file__).resolve().parent / "rigid_sphere_ff_debug.npz"),
-        "plot_form_function_from_plugin_dump": True,
-    },
-}
+# SIM_PARAMS = {
+#     "environment": {
+#         "salinity": 14.5,
+#         "sound_speed_ms": 1480.0,
+#         "temperature_c": 11.2,
+#     },
+#     "rigid_sphere": {
+#         "radius_m": 0.25,
+#         "k0a": 15.0,
+#         "n_terms": 80,
+#         "scale": 1.0,
+#         "ka_eps": 1e-8,
+#     },
+#     "signal": {
+#         "mode": "sine",   # "sine" or "lfm"
+#         "n_cycles": 2,
+#         "amplitude": 1.0,
+#         "initial_phase": 0.0,
+#     },
+#     "debug": {
+#         "plot_incident": True,
+#         "plot_incident_spectrum": True,
+#         "incident_fft_points": 16384,
+#         "plot_form_function": True,
+#         "form_function_ka_max": 14,
+#         "form_function_points": 2000,
+#         "dump_form_function_from_plugin": True,
+#         "plugin_dump_path": str(Path(__file__).resolve().parent / "rigid_sphere_ff_debug.npz"),
+#         "plot_form_function_from_plugin_dump": True,
+#     },
+# }
 
 def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # Begin our configuration dictionary.
@@ -204,87 +206,68 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
                 },
             }
         ),
-        loader.distortion(
-        {
-            "name": "RigidSphereFormFunction:openstb.simulator.distortion.rigid_sphere",
-            "parameters": {
-                "radius_m": SIM_PARAMS["rigid_sphere"]["radius_m"],
-                "n_terms": SIM_PARAMS["rigid_sphere"]["n_terms"],
-                "scale": SIM_PARAMS["rigid_sphere"]["scale"],
-                "ka_eps": SIM_PARAMS["rigid_sphere"]["ka_eps"],
-                "debug_dump": SIM_PARAMS["debug"]["dump_form_function_from_plugin"],
-                "debug_dump_path": SIM_PARAMS["debug"]["plugin_dump_path"],
-            },
-        }
-    )
+    #     loader.distortion(
+    #     {
+    #         "name": "RigidSphereFormFunction:openstb.simulator.distortion.rigid_sphere",
+    #         "parameters": {
+    #             "radius_m": SIM_PARAMS["rigid_sphere"]["radius_m"],
+    #             "n_terms": SIM_PARAMS["rigid_sphere"]["n_terms"],
+    #             "scale": SIM_PARAMS["rigid_sphere"]["scale"],
+    #             "ka_eps": SIM_PARAMS["rigid_sphere"]["ka_eps"],
+    #             "debug_dump": SIM_PARAMS["debug"]["dump_form_function_from_plugin"],
+    #             "debug_dump_path": SIM_PARAMS["debug"]["plugin_dump_path"],
+    #         },
+    #     }
+    # )
     ]
 
-    # Quick switch between original chirp and new sinusoid burst.
-    signal_mode = SIM_PARAMS["signal"]["mode"]  # "sine" or "lfm"
+    signal, _, sim_baseband_frequency = build_signal_from_params(SIM_PARAMS)
+    # # Quick switch between original chirp and new sinusoid burst.
+    # signal_mode = SIM_PARAMS["signal"]["mode"]  # "sine" or "lfm"
 
-    # Define the signal the sonar will transmit; a Tukey-windowed LFM upchirp here.
-    if signal_mode == "lfm":
-        # Original configuration: Tukey-windowed LFM chirp.
-        sim_baseband_frequency = 110e3
-        signal = loader.signal(
-            {
-                "name": "lfm_chirp",
-                "parameters": {
-                    "f_start": 100e3,
-                    "f_stop": 120e3,
-                    "duration": 0.015,
-                    "rms_spl": 190,
-                    "rms_after_window": True,
-                    "window": {
-                        "name": "tukey",
-                        "parameters": {"alpha": 0.2},
-                    },
-                },
-            }
-        )
+    # # Define the signal the sonar will transmit; a Tukey-windowed LFM upchirp here.
+    # if signal_mode == "lfm":
+    #     # Original configuration: Tukey-windowed LFM chirp.
+    #     sim_baseband_frequency = 110e3
+    #     signal = loader.signal(
+    #         {
+    #             "name": "lfm_chirp",
+    #             "parameters": {
+    #                 "f_start": 100e3,
+    #                 "f_stop": 120e3,
+    #                 "duration": 0.015,
+    #                 "rms_spl": 190,
+    #                 "rms_after_window": True,
+    #                 "window": {
+    #                     "name": "tukey",
+    #                     "parameters": {"alpha": 0.2},
+    #                 },
+    #             },
+    #         }
+    #     )
 
-    elif signal_mode == "sine":
-        # Parameters aligned with your RigidSphereEcho setup.
-        c = SIM_PARAMS["environment"]["sound_speed_ms"]
-        a = SIM_PARAMS["rigid_sphere"]["radius_m"]
-        k0a = SIM_PARAMS["rigid_sphere"]["k0a"]
-        f0 = k0a * c / (2 * np.pi * a)
+    # elif signal_mode == "sine":
+    #     # Parameters aligned with your RigidSphereEcho setup.
+    #     c = SIM_PARAMS["environment"]["sound_speed_ms"]
+    #     a = SIM_PARAMS["rigid_sphere"]["radius_m"]
+    #     k0a = SIM_PARAMS["rigid_sphere"]["k0a"]
+    #     f0 = k0a * c / (2 * np.pi * a)
 
-        sim_baseband_frequency = 0.0
-        signal = loader.signal(
-            {
-                "name": "SinusoidBurst:openstb.simulator.system.signal",
-                "parameters": {
-                    "f0": f0,
-                    "n_cycles": SIM_PARAMS["signal"]["n_cycles"],
-                    "amplitude": SIM_PARAMS["signal"]["amplitude"],
-                    "initial_phase": SIM_PARAMS["signal"]["initial_phase"],
-                },
-            }
-        )
+    #     sim_baseband_frequency = 0.0
+    #     signal = loader.signal(
+    #         {
+    #             "name": "SinusoidBurst:openstb.simulator.system.signal",
+    #             "parameters": {
+    #                 "f0": f0,
+    #                 "n_cycles": SIM_PARAMS["signal"]["n_cycles"],
+    #                 "amplitude": SIM_PARAMS["signal"]["amplitude"],
+    #                 "initial_phase": SIM_PARAMS["signal"]["initial_phase"],
+    #             },
+    #         }
+    #     )
 
-    else:
-        raise ValueError(f"Unknown signal_mode '{signal_mode}'")
-
-
-    # if SIM_PARAMS["debug"]["plot_incident"]:
-    #     import matplotlib.pyplot as plt
-
-    #     # Plot solo de diagnóstico (no cambia la simulación real)
-    #     if signal_mode == "sine":
-    #         # Para que se vea igual que en RigidSphereEcho: alta resolución + pasabanda
-    #         sample_rate_plot = 100.0 * f0
-    #         baseband_frequency_plot = 0.0
-    #         title = f"Incident Signal: {SIM_PARAMS['signal']['n_cycles']}-cycle sinusoid at {f0:.1f} Hz"
-    #     else:
-    #         # Para otras señales, usar una vista razonable por defecto
-    #         sample_rate_plot = 10.0 * 30e3
-    #         baseband_frequency_plot = 110e3
-    #         title = f"Incident signal ({signal_mode})"
-
-        #t_end = 3.0 * signal.duration
-        #t = np.arange(0.0, t_end, 1.0 / sample_rate_plot)
-        #s = signal.sample(t, baseband_frequency_plot)
+    # else:
+    #     raise ValueError(f"Unknown signal_mode '{signal_mode}'")
 
 
     # Set the desired orientation of the transducers. Without rotation, the normal of

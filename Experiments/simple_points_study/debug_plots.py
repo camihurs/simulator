@@ -7,73 +7,74 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from openstb.simulator.plugin import loader
+from shared_params import SIM_PARAMS
+from signal_factory import build_signal_from_params
+
+# SIM_PARAMS = {
+#     "environment": {
+#         "sound_speed_ms": 1480.0,
+#     },
+#     "rigid_sphere": {
+#         "radius_m": 0.25,
+#         "k0a": 15.0,
+#     },
+#     "signal": {
+#         "mode": "sine",  # "sine" or "lfm"
+#         "n_cycles": 2,
+#         "amplitude": 1.0,
+#         "initial_phase": 0.0,
+#     },
+#     "debug": {
+#         "plot_incident": True,
+#         "plot_incident_spectrum": True,
+#         "incident_fft_points": 16384,
+#         "plot_form_function_from_plugin_dump": True,
+#         "plugin_dump_path": str(Path(__file__).resolve().parent / "rigid_sphere_ff_debug.npz"),
+#     },
+# }
 
 
-SIM_PARAMS = {
-    "environment": {
-        "sound_speed_ms": 1480.0,
-    },
-    "rigid_sphere": {
-        "radius_m": 0.25,
-        "k0a": 15.0,
-    },
-    "signal": {
-        "mode": "sine",  # "sine" or "lfm"
-        "n_cycles": 2,
-        "amplitude": 1.0,
-        "initial_phase": 0.0,
-    },
-    "debug": {
-        "plot_incident": True,
-        "plot_incident_spectrum": True,
-        "incident_fft_points": 16384,
-        "plot_form_function_from_plugin_dump": True,
-        "plugin_dump_path": str(Path(__file__).resolve().parent / "rigid_sphere_ff_debug.npz"),
-    },
-}
+# def build_signal(signal_mode: str):
+#     if signal_mode == "lfm":
+#         signal = loader.signal(
+#             {
+#                 "name": "lfm_chirp",
+#                 "parameters": {
+#                     "f_start": 100e3,
+#                     "f_stop": 120e3,
+#                     "duration": 0.015,
+#                     "rms_spl": 190,
+#                     "rms_after_window": True,
+#                     "window": {
+#                         "name": "tukey",
+#                         "parameters": {"alpha": 0.2},
+#                     },
+#                 },
+#             }
+#         )
+#         f0 = None
 
+#     elif signal_mode == "sine":
+#         c = SIM_PARAMS["environment"]["sound_speed_ms"]
+#         a = SIM_PARAMS["rigid_sphere"]["radius_m"]
+#         k0a = SIM_PARAMS["rigid_sphere"]["k0a"]
+#         f0 = k0a * c / (2.0 * np.pi * a)
 
-def build_signal(signal_mode: str):
-    if signal_mode == "lfm":
-        signal = loader.signal(
-            {
-                "name": "lfm_chirp",
-                "parameters": {
-                    "f_start": 100e3,
-                    "f_stop": 120e3,
-                    "duration": 0.015,
-                    "rms_spl": 190,
-                    "rms_after_window": True,
-                    "window": {
-                        "name": "tukey",
-                        "parameters": {"alpha": 0.2},
-                    },
-                },
-            }
-        )
-        f0 = None
+#         signal = loader.signal(
+#             {
+#                 "name": "SinusoidBurst:openstb.simulator.system.signal",
+#                 "parameters": {
+#                     "f0": f0,
+#                     "n_cycles": SIM_PARAMS["signal"]["n_cycles"],
+#                     "amplitude": SIM_PARAMS["signal"]["amplitude"],
+#                     "initial_phase": SIM_PARAMS["signal"]["initial_phase"],
+#                 },
+#             }
+#         )
+#     else:
+#         raise ValueError(f"Unknown signal_mode '{signal_mode}'")
 
-    elif signal_mode == "sine":
-        c = SIM_PARAMS["environment"]["sound_speed_ms"]
-        a = SIM_PARAMS["rigid_sphere"]["radius_m"]
-        k0a = SIM_PARAMS["rigid_sphere"]["k0a"]
-        f0 = k0a * c / (2.0 * np.pi * a)
-
-        signal = loader.signal(
-            {
-                "name": "SinusoidBurst:openstb.simulator.system.signal",
-                "parameters": {
-                    "f0": f0,
-                    "n_cycles": SIM_PARAMS["signal"]["n_cycles"],
-                    "amplitude": SIM_PARAMS["signal"]["amplitude"],
-                    "initial_phase": SIM_PARAMS["signal"]["initial_phase"],
-                },
-            }
-        )
-    else:
-        raise ValueError(f"Unknown signal_mode '{signal_mode}'")
-
-    return signal, f0
+#     return signal, f0
 
 
 def sample_for_plot(signal, signal_mode: str, f0: float | None):
@@ -188,7 +189,8 @@ def plot_form_function_from_dump():
 
 def main():
     signal_mode = SIM_PARAMS["signal"]["mode"]
-    signal, f0 = build_signal(signal_mode)
+    #signal, f0 = build_signal(signal_mode)
+    signal, f0, _ = build_signal_from_params(SIM_PARAMS)
 
     if SIM_PARAMS["debug"].get("plot_incident", False):
         t, s, sample_rate_plot, title = sample_for_plot(signal, signal_mode, f0)
