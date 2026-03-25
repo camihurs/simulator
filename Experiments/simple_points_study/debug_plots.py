@@ -10,72 +10,6 @@ from openstb.simulator.plugin import loader
 from shared_params import SIM_PARAMS
 from signal_factory import build_signal_from_params
 
-# SIM_PARAMS = {
-#     "environment": {
-#         "sound_speed_ms": 1480.0,
-#     },
-#     "rigid_sphere": {
-#         "radius_m": 0.25,
-#         "k0a": 15.0,
-#     },
-#     "signal": {
-#         "mode": "sine",  # "sine" or "lfm"
-#         "n_cycles": 2,
-#         "amplitude": 1.0,
-#         "initial_phase": 0.0,
-#     },
-#     "debug": {
-#         "plot_incident": True,
-#         "plot_incident_spectrum": True,
-#         "incident_fft_points": 16384,
-#         "plot_form_function_from_plugin_dump": True,
-#         "plugin_dump_path": str(Path(__file__).resolve().parent / "rigid_sphere_ff_debug.npz"),
-#     },
-# }
-
-
-# def build_signal(signal_mode: str):
-#     if signal_mode == "lfm":
-#         signal = loader.signal(
-#             {
-#                 "name": "lfm_chirp",
-#                 "parameters": {
-#                     "f_start": 100e3,
-#                     "f_stop": 120e3,
-#                     "duration": 0.015,
-#                     "rms_spl": 190,
-#                     "rms_after_window": True,
-#                     "window": {
-#                         "name": "tukey",
-#                         "parameters": {"alpha": 0.2},
-#                     },
-#                 },
-#             }
-#         )
-#         f0 = None
-
-#     elif signal_mode == "sine":
-#         c = SIM_PARAMS["environment"]["sound_speed_ms"]
-#         a = SIM_PARAMS["rigid_sphere"]["radius_m"]
-#         k0a = SIM_PARAMS["rigid_sphere"]["k0a"]
-#         f0 = k0a * c / (2.0 * np.pi * a)
-
-#         signal = loader.signal(
-#             {
-#                 "name": "SinusoidBurst:openstb.simulator.system.signal",
-#                 "parameters": {
-#                     "f0": f0,
-#                     "n_cycles": SIM_PARAMS["signal"]["n_cycles"],
-#                     "amplitude": SIM_PARAMS["signal"]["amplitude"],
-#                     "initial_phase": SIM_PARAMS["signal"]["initial_phase"],
-#                 },
-#             }
-#         )
-#     else:
-#         raise ValueError(f"Unknown signal_mode '{signal_mode}'")
-
-#     return signal, f0
-
 
 def sample_for_plot(signal, signal_mode: str, f0: float | None):
     if signal_mode == "sine":
@@ -189,18 +123,98 @@ def plot_form_function_from_dump():
 
 def main():
     signal_mode = SIM_PARAMS["signal"]["mode"]
-    #signal, f0 = build_signal(signal_mode)
-    signal, f0, _ = build_signal_from_params(SIM_PARAMS)
+    signal, f0, sim_baseband_frequency = build_signal_from_params(SIM_PARAMS)
 
     if SIM_PARAMS["debug"].get("plot_incident", False):
         t, s, sample_rate_plot, title = sample_for_plot(signal, signal_mode, f0)
         plot_incident_signal(t, s, title)
+
+        # Diagnostic: sample the incident signal on the exact simulation time grid
+        # used to generate the echoes in simple_points.npz.
+        results = np.load("simple_points.npz")
+        t_sim = results["sample_time"]
+        s_sim = signal.sample(t_sim, sim_baseband_frequency)
+
+        fs_sim = 1.0 / np.mean(np.diff(t_sim))
+        if f0 is not None:
+            print(f"Simulation-grid incident sampling: fs={fs_sim:.1f} Hz, f0={f0:.1f} Hz, samples/cycle={fs_sim/f0:.3f}")
+
+        plt.figure(figsize=(10, 4))
+        plt.plot(t_sim * 1e3, np.real(s_sim), "g-", linewidth=1.2)
+        plt.xlabel("Time [ms]")
+        plt.ylabel("Amplitude")
+        plt.title("Incident signal sampled on simulation grid (same grid as echo)")
+        plt.grid(True, alpha=0.3)
+        plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
+        plt.tight_layout()
+        plt.show()
 
         if SIM_PARAMS["debug"].get("plot_incident_spectrum", False):
             plot_incident_spectrum(s, sample_rate_plot)
 
     if SIM_PARAMS["debug"].get("plot_form_function_from_plugin_dump", False):
         plot_form_function_from_dump()
+
+    if SIM_PARAMS["debug"].get("plot_echo_linear_pressure", True):
+        results = np.load("simple_points.npz")
+        t_echo = results["sample_time"]
+        P_echo = results["pressure"]
+
+        ping_to_plot = 5   # cambia aquí el ping que quieras ver
+        rx_idx = 0
+        trace_echo = np.real(P_echo[ping_to_plot, rx_idx, :])
+        peak = np.max(np.abs(trace_echo))
+        trace_echo_norm = trace_echo / peak if peak > 0 else trace_echo
+
+        plt.figure(figsize=(10, 4))
+        plt.plot(t_echo, trace_echo_norm, "k-", linewidth=1.2)
+        plt.xlabel("Time [s]")
+        plt.ylabel("Normalized amplitude (signed)")
+        plt.title(f"Echo (signed, normalized), ping {ping_to_plot}, rx {rx_idx}")
+        plt.grid(True, alpha=0.3)
+        plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
+        plt.tight_layout()
+        plt.show()
+
+    # Theta diagnostic across pings (current simple_points_study geometry).
+    results = np.load("simple_points.npz")
+    ping_t = results["ping_start_time"]
+
+    start_pos = np.array([0.0, 0.0, 0.0])
+    speed = 1.5
+    tx_offset = np.array([0.0, 1.2, 0.3])
+    rx_offset = np.array([0.0, 1.2, 0.0])
+    target = np.array([5.0, 40.0, 10.0])
+
+    vehicle_pos = start_pos + np.column_stack([speed * ping_t, np.zeros_like(ping_t), np.zeros_like(ping_t)])
+    tx_pos = vehicle_pos + tx_offset
+    rx_pos = vehicle_pos + rx_offset
+
+    inc = target[np.newaxis, :] - tx_pos
+    sca = rx_pos - target[np.newaxis, :]
+
+    cos_th = np.sum(inc * sca, axis=1) / (np.linalg.norm(inc, axis=1) * np.linalg.norm(sca, axis=1))
+    cos_th = np.clip(cos_th, -1.0, 1.0)
+    theta = np.arccos(cos_th)
+
+    print("theta(rad) min/max:", float(theta.min()), float(theta.max()))
+    print("theta(deg) min/max:", float(np.degrees(theta).min()), float(np.degrees(theta).max()))
+    print("first 10 theta(deg):", np.degrees(theta[:10]))
+    print("theta ping 14 [rad]:", float(theta[14]))
+
+    fs = 1.0 / np.mean(np.diff(results["sample_time"]))
+    Ns = len(results["sample_time"])
+    gb = int(np.ceil(signal.duration * 1.1 * fs))
+    nfft_sim = Ns + gb
+    df_sim = fs / nfft_sim
+
+    print("FFT diagnostic (sim):")
+    print("  Ns:", Ns)
+    print("  gb:", gb)
+    print("  Nfft_sim = Ns + gb:", nfft_sim)
+    print("  df_sim [Hz]:", df_sim)
+    print("  n_fft in RigidSphereEcho.py:", 16384)
+    print("  df_RigidSphereEcho [Hz]:", fs / 16384.0)
 
 
 if __name__ == "__main__":

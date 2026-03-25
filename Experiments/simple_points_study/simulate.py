@@ -23,41 +23,6 @@ from signal_factory import build_signal_from_params
 # therefefore Dask local clusters.
 
 
-# ============================================================================
-# Experiment Parameters (single source of truth for this script)
-# ============================================================================
-# SIM_PARAMS = {
-#     "environment": {
-#         "salinity": 14.5,
-#         "sound_speed_ms": 1480.0,
-#         "temperature_c": 11.2,
-#     },
-#     "rigid_sphere": {
-#         "radius_m": 0.25,
-#         "k0a": 15.0,
-#         "n_terms": 80,
-#         "scale": 1.0,
-#         "ka_eps": 1e-8,
-#     },
-#     "signal": {
-#         "mode": "sine",   # "sine" or "lfm"
-#         "n_cycles": 2,
-#         "amplitude": 1.0,
-#         "initial_phase": 0.0,
-#     },
-#     "debug": {
-#         "plot_incident": True,
-#         "plot_incident_spectrum": True,
-#         "incident_fft_points": 16384,
-#         "plot_form_function": True,
-#         "form_function_ka_max": 14,
-#         "form_function_points": 2000,
-#         "dump_form_function_from_plugin": True,
-#         "plugin_dump_path": str(Path(__file__).resolve().parent / "rigid_sphere_ff_debug.npz"),
-#         "plot_form_function_from_plugin_dump": True,
-#     },
-# }
-
 def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # Begin our configuration dictionary.
     config: simple_points.SimplePointConfig = {}
@@ -173,7 +138,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
                 "name": "single_point",
                 "parameters": {
                     "position": (5, 40, 10),
-                    "reflectivity": 10,
+                    "reflectivity": 1,
                 },
             }
         ),
@@ -190,84 +155,40 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # Apply two distortions: spherical spreading (1/r scaling to the amplitude on
     # each direction) and acoustic attenuation.
     config["distortion"] = [
+        # loader.distortion(
+        #     {
+        #         "name": "geometric_spreading",
+        #         "parameters": {
+        #             "power": 1.0,
+        #         },
+        #     }
+        # ),
+        # loader.distortion(
+        #     {
+        #         "name": "anslie_mccolm_attenuation",
+        #         "parameters": {
+        #             "frequency": "centre",
+        #         },
+        #     }
+        # ),
         loader.distortion(
-            {
-                "name": "geometric_spreading",
-                "parameters": {
-                    "power": 1.0,
-                },
-            }
-        ),
-        loader.distortion(
-            {
-                "name": "anslie_mccolm_attenuation",
-                "parameters": {
-                    "frequency": "centre",
-                },
-            }
-        ),
-    #     loader.distortion(
-    #     {
-    #         "name": "RigidSphereFormFunction:openstb.simulator.distortion.rigid_sphere",
-    #         "parameters": {
-    #             "radius_m": SIM_PARAMS["rigid_sphere"]["radius_m"],
-    #             "n_terms": SIM_PARAMS["rigid_sphere"]["n_terms"],
-    #             "scale": SIM_PARAMS["rigid_sphere"]["scale"],
-    #             "ka_eps": SIM_PARAMS["rigid_sphere"]["ka_eps"],
-    #             "debug_dump": SIM_PARAMS["debug"]["dump_form_function_from_plugin"],
-    #             "debug_dump_path": SIM_PARAMS["debug"]["plugin_dump_path"],
-    #         },
-    #     }
-    # )
+        {
+            "name": "RigidSphereFormFunction:openstb.simulator.distortion.rigid_sphere",
+            "parameters": {
+                "radius_m": SIM_PARAMS["rigid_sphere"]["radius_m"],
+                "n_terms": SIM_PARAMS["rigid_sphere"]["n_terms"],
+                "scale": SIM_PARAMS["rigid_sphere"]["scale"],
+                "ka_eps": SIM_PARAMS["rigid_sphere"]["ka_eps"],
+                "debug_dump": SIM_PARAMS["debug"]["dump_form_function_from_plugin"],
+                "debug_dump_path": SIM_PARAMS["debug"]["plugin_dump_path"],
+            },
+        }
+    )
     ]
 
-    signal, _, sim_baseband_frequency = build_signal_from_params(SIM_PARAMS)
-    # # Quick switch between original chirp and new sinusoid burst.
-    # signal_mode = SIM_PARAMS["signal"]["mode"]  # "sine" or "lfm"
-
-    # # Define the signal the sonar will transmit; a Tukey-windowed LFM upchirp here.
-    # if signal_mode == "lfm":
-    #     # Original configuration: Tukey-windowed LFM chirp.
-    #     sim_baseband_frequency = 110e3
-    #     signal = loader.signal(
-    #         {
-    #             "name": "lfm_chirp",
-    #             "parameters": {
-    #                 "f_start": 100e3,
-    #                 "f_stop": 120e3,
-    #                 "duration": 0.015,
-    #                 "rms_spl": 190,
-    #                 "rms_after_window": True,
-    #                 "window": {
-    #                     "name": "tukey",
-    #                     "parameters": {"alpha": 0.2},
-    #                 },
-    #             },
-    #         }
-    #     )
-
-    # elif signal_mode == "sine":
-    #     # Parameters aligned with your RigidSphereEcho setup.
-    #     c = SIM_PARAMS["environment"]["sound_speed_ms"]
-    #     a = SIM_PARAMS["rigid_sphere"]["radius_m"]
-    #     k0a = SIM_PARAMS["rigid_sphere"]["k0a"]
-    #     f0 = k0a * c / (2 * np.pi * a)
-
-    #     sim_baseband_frequency = 0.0
-    #     signal = loader.signal(
-    #         {
-    #             "name": "SinusoidBurst:openstb.simulator.system.signal",
-    #             "parameters": {
-    #                 "f0": f0,
-    #                 "n_cycles": SIM_PARAMS["signal"]["n_cycles"],
-    #                 "amplitude": SIM_PARAMS["signal"]["amplitude"],
-    #                 "initial_phase": SIM_PARAMS["signal"]["initial_phase"],
-    #             },
-    #         }
-    #     )
-
-    # else:
-    #     raise ValueError(f"Unknown signal_mode '{signal_mode}'")
+    #signal, _, sim_baseband_frequency = build_signal_from_params(SIM_PARAMS)
+    signal, f0, sim_baseband_frequency = build_signal_from_params(SIM_PARAMS)
+    sample_rate_sim = (100.0 * f0) if f0 is not None else 30e3
 
 
     # Set the desired orientation of the transducers. Without rotation, the normal of
@@ -278,7 +199,8 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # starboard) and 15 degrees around x (15 degrees down).
     q_yaw = quaternionic.array.from_rotation_vector([0, 0, np.pi / 2])
     q_tilt = quaternionic.array.from_rotation_vector([np.radians(15), 0, 0])
-    q_transducer = q_tilt * q_yaw
+    #q_transducer = q_tilt * q_yaw
+    q_transducer = quaternionic.array([1.0, 0.0, 0.0, 0.0])
 
     # Define a common far-field beampattern for the transducers. Note that this is just
     # a distortion attached to the transducers; we could add this to the list of
@@ -302,7 +224,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
             "parameters": {
                 "position": [0, 1.2, 0.3],
                 "orientation": q_transducer,
-                "beampattern": beampattern,
+                #"beampattern": beampattern,
             },
         }
     )
@@ -317,7 +239,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
                 "parameters": {
                     "position": [x, 1.2, 0],
                     "orientation": q_transducer,
-                    "beampattern": beampattern,
+                    #"beampattern": beampattern,
                 },
             }
         )
@@ -378,7 +300,8 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     sim = simple_points.SimplePointSimulation(
         result_filename="simple_points.zarr",
         points_per_chunk=1000,
-        sample_rate=30e3,
+        #sample_rate=30e3,
+        sample_rate=sample_rate_sim,
         baseband_frequency=sim_baseband_frequency,
     )
 

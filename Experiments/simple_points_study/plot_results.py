@@ -22,15 +22,12 @@ print("finite ratio:", np.isfinite(P).mean())
 
 ping_energy = np.max(np.abs(P[:, 0, :]), axis=1)
 ping_idx = int(np.argmax(ping_energy))
-#trace = P[ping_idx, 0, :]
 
-trace = P[14, 0, :]
+ping_to_plot = 5   # cambia aquí el ping que quieras ver
+trace = P[ping_to_plot, 0, :]
 plt.figure()
-#plt.plot(t, 20 * np.log10(np.abs(trace) / 1e-6 + 1e-12))
-#plt.title(f"Middle receiver (x=0), ping {ping_idx}")
-plt.title(f"Middle receiver (x=0), ping {14}")
+plt.title(f"Middle receiver (x=0), ping {ping_to_plot}")
 plt.plot(t, 20 * np.log10(np.abs(trace) / 1e-6))
-#plt.title("Middle receiver (x=0), ping 14")
 plt.xlabel("Time (s)")
 plt.ylabel("Echo strength (SPL)")
 plt.show()
@@ -39,7 +36,6 @@ plt.show()
 rx = P[:, 0, :]
 plt.figure()
 plt.imshow(
-    #20 * np.log10(np.abs(rx) / 1e-6 + 1e-12),
     20 * np.log10(np.abs(rx) / 1e-6),
     aspect="auto",
     origin="lower",
