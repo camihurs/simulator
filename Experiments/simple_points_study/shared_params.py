@@ -17,7 +17,7 @@ SIM_PARAMS = {
         "ka_eps": 1e-8,
     },
     "signal": {
-        "mode": "sine",  # "sine" or "lfm"
+        "mode": "lfm",  # "sine" or "lfm"
         "n_cycles": 2,
         "amplitude": 1.0,
         "initial_phase": 0.0,
@@ -28,7 +28,7 @@ SIM_PARAMS = {
         "incident_fft_points": 16384,
         "plot_form_function": True,
         "form_function_ka_max": 14,
-        "form_function_points": 2000,
+        #"form_function_points": 2000,
         "dump_form_function_from_plugin": True,
         "plugin_dump_path": str(Path(__file__).resolve().parent / "rigid_sphere_ff_debug.npz"),
         "plot_form_function_from_plugin_dump": True,

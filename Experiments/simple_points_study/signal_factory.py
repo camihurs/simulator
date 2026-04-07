@@ -10,19 +10,19 @@ def build_signal_from_params(sim_params: dict):
     signal_mode = sim_params["signal"]["mode"]
 
     if signal_mode == "lfm":
-        sim_baseband_frequency = 110e3
+        sim_baseband_frequency = 5.25e3
         signal = loader.signal(
             {
                 "name": "lfm_chirp",
                 "parameters": {
-                    "f_start": 100e3,
-                    "f_stop": 120e3,
-                    "duration": 0.015,
+                    "f_start": 0.5e3,
+                    "f_stop": 10e3,
+                    "duration": 0.02,
                     "rms_spl": 190,
                     "rms_after_window": True,
                     "window": {
-                        "name": "tukey",
-                        "parameters": {"alpha": 0.2},
+                        "name": "hann", #Estaba tukey
+                        "parameters": {}, #{"alpha": 0.2}
                     },
                 },
             }

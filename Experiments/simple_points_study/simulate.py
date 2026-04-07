@@ -94,7 +94,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
         {
             "name": "constant_interval",
             "parameters": {
-                "interval": 0.2,
+                "interval": 0.1, #Estaba en 0.2
                 "start_delay": 0,
                 "end_delay": 0.5,
             },
@@ -224,7 +224,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
             "parameters": {
                 "position": [0, 1.2, 0.3],
                 "orientation": q_transducer,
-                #"beampattern": beampattern,
+                "beampattern": beampattern, #Comment this line to use an omnidirectional beampattern for the transmitter.
             },
         }
     )
@@ -239,7 +239,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
                 "parameters": {
                     "position": [x, 1.2, 0],
                     "orientation": q_transducer,
-                    #"beampattern": beampattern,
+                    "beampattern": beampattern,
                 },
             }
         )
