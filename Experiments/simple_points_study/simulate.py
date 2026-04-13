@@ -94,7 +94,8 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
         {
             "name": "constant_interval",
             "parameters": {
-                "interval": 0.1, #Estaba en 0.2
+                "interval": 0.1, #Original in 0.2
+                #"interval": 0.8, #For longer distances
                 "start_delay": 0,
                 "end_delay": 0.5,
             },
@@ -137,6 +138,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
             {
                 "name": "single_point",
                 "parameters": {
+                    #"position": (5, 500, 10), #Longer distance, to try to see the effect of the Anslie attenuation plugin.
                     "position": (5, 40, 10),
                     "reflectivity": 1,
                 },
@@ -199,8 +201,8 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # starboard) and 15 degrees around x (15 degrees down).
     q_yaw = quaternionic.array.from_rotation_vector([0, 0, np.pi / 2])
     q_tilt = quaternionic.array.from_rotation_vector([np.radians(15), 0, 0])
-    #q_transducer = q_tilt * q_yaw
-    q_transducer = quaternionic.array([1.0, 0.0, 0.0, 0.0])
+    q_transducer = q_tilt * q_yaw
+    #q_transducer = quaternionic.array([1.0, 0.0, 0.0, 0.0])
 
     # Define a common far-field beampattern for the transducers. Note that this is just
     # a distortion attached to the transducers; we could add this to the list of
@@ -209,11 +211,14 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     beampattern = {
         "name": "rectangular_beampattern",
         "parameters": {
-            "width": 0.015,
-            "height": 0.03,
+            #"width": 0.015,
+            "width": 0.6,
+            #"height": 0.03,
+            "height": 0.8,
             "transmit": True,
             "receive": False,
-            "frequency": "centre",
+            #"frequency": "centre",
+            "frequency": "all",
         },
     }
 

@@ -90,16 +90,6 @@ class RigidSphereFormFunction(Distortion):
         tt_result: TravelTimeResult,
     ) -> np.ndarray:
         self._calls += 1
-        if self._calls % 50 == 0:
-            print(f"RigidSphere apply calls: {self._calls}")
-
-        print(
-        "RigidSphere apply:",
-        "S", np.shape(S),
-        "f", np.shape(f),
-        "inc", np.shape(tt_result.incident_vector),
-        "sca", np.shape(tt_result.scattering_vector),
-    )
 
         S_arr = np.asarray(S, dtype=np.complex128)  # expected (Nr|1, Nf, Nt)
 
@@ -118,6 +108,18 @@ class RigidSphereFormFunction(Distortion):
         sca = np.asarray(tt_result.scattering_vector, dtype=float)   # (Nr, Nt, 3)
         cos_theta = np.sum(inc[np.newaxis, :, :] * sca, axis=-1)    # (Nr, Nt)
         cos_theta = np.clip(cos_theta, -1.0, 1.0)
+
+
+        # User-friendly progress: one line every 50 calls.
+        if self._calls % 5 == 0:
+            Nr = int(sca.shape[0]) if sca.ndim >= 1 else 0 #Number of receivers in the chunk
+            Nt = int(inc.shape[0]) if inc.ndim >= 1 else 0 #Number of targets in the chunk
+            Nf = int(ka.size) #Number of frequency bins in the chunk
+            print( #calls is the number of times the apply method has been called in this worker, which corresponds to the number of chunks processed.
+                "RigidSphere progress: "
+                f"call={self._calls}, Nf={Nf}, Nr={Nr}, Nt={Nt}, "
+                f"ka=[{float(np.min(ka)):.3f}, {float(np.max(ka)):.3f}]"
+            )
 
         ff = self._form_function(ka, cos_theta)  # (Nr, Nf, Nt)
 
@@ -148,5 +150,4 @@ class RigidSphereFormFunction(Distortion):
             except Exception as e:
                 print(f"RigidSphere debug dump failed: {e}")
 
-        print("RigidSphere out:", np.shape(S_arr), np.shape(ff))
         return S_arr * (self.scale * ff)

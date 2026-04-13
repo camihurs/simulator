@@ -6,39 +6,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from openstb.simulator.plugin import loader
 from shared_params import SIM_PARAMS
 from signal_factory import build_signal_from_params
-
-
-def sample_for_plot(signal, signal_mode: str, f0: float | None):
-    if signal_mode == "sine":
-        sample_rate_plot = 100.0 * f0
-        baseband_frequency_plot = 0.0
-        title = f"Incident Signal: {SIM_PARAMS['signal']['n_cycles']}-cycle sinusoid at {f0:.1f} Hz"
-    else:
-        sample_rate_plot = 10.0 * 30e3
-        baseband_frequency_plot = 110e3
-        title = f"Incident signal ({signal_mode})"
-
-    t_end = 3.0 * signal.duration
-    t = np.arange(0.0, t_end, 1.0 / sample_rate_plot)
-    s = signal.sample(t, baseband_frequency_plot)
-
-    return t, s, sample_rate_plot, title
-
-
-def plot_incident_signal(t: np.ndarray, s: np.ndarray, title: str):
-    plt.figure(figsize=(10, 4))
-    plt.plot(t * 1e3, np.real(s), "b-", linewidth=1.5)
-    plt.xlabel("Time [ms]")
-    plt.ylabel("Amplitude")
-    plt.title(title)
-    plt.grid(True, alpha=0.3)
-    plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
-    plt.xlim(-0.05, (t[-1] if len(t) else 0.0) * 1e3)
-    plt.tight_layout()
-    plt.show()
 
 
 def plot_incident_spectrum(s: np.ndarray, sample_rate_plot: float):
@@ -84,6 +53,59 @@ def plot_incident_spectrum(s: np.ndarray, sample_rate_plot: float):
     plt.show()
 
 
+def plot_incident_spectrum_hz(
+    signal,
+    sample_rate: float,
+    baseband_frequency: float,
+    sample_time: np.ndarray,
+):
+    # Match simple_points controller logic: Ns + guard band, complex FFT, fftshift.
+    Ns = len(sample_time)
+    gb = int(np.ceil(signal.duration * 1.1 * sample_rate))
+    nfft = Ns + gb
+
+    t = np.arange(nfft) / sample_rate
+    s = signal.sample(t, baseband_frequency)
+
+    S = np.fft.fftshift(np.fft.fft(s))
+    f = np.fft.fftshift(np.fft.fftfreq(nfft, 1.0 / sample_rate)) + baseband_frequency
+
+    mag = np.abs(S)
+    mag_norm = mag / (np.max(mag) + 1e-30)
+    mag_db = 20.0 * np.log10(np.maximum(mag_norm, 1e-12))
+
+    # Auto frequency window based on the signal band.
+    fmin = float(signal.minimum_frequency)
+    fmax = float(signal.maximum_frequency)
+    bw = max(fmax - fmin, 1.0)
+    pad = 0.25 * bw
+    x0 = max(0.0, fmin - pad)
+    x1 = fmax + pad
+
+    plt.figure(figsize=(10, 4))
+    plt.plot(f, mag_db, "b-", linewidth=1.2)
+    plt.xlabel("Frequency [Hz]")
+    plt.ylabel("Magnitude [dB, normalized]")
+    plt.title("Incident spectrum in frequency domain (matches simulation FFT pipeline)")
+    plt.grid(True, alpha=0.3)
+    plt.xlim(x0, x1)
+    plt.ylim(-120, 5)
+    plt.tight_layout()
+    plt.show()
+
+    # Linear magnitude view (normalized)
+    plt.figure(figsize=(10, 4))
+    plt.plot(f, mag_norm, "g-", linewidth=1.2)
+    plt.xlabel("Frequency [Hz]")
+    plt.ylabel("Magnitude [linear, normalized]")
+    plt.title("Incident spectrum in frequency domain (linear scale)")
+    plt.grid(True, alpha=0.3)
+    plt.xlim(x0, x1)
+    plt.ylim(0.0, 1.05)
+    plt.tight_layout()
+    plt.show()
+
+
 def plot_form_function_from_dump():
     dump_path = Path(SIM_PARAMS["debug"]["plugin_dump_path"])
 
@@ -96,6 +118,7 @@ def plot_form_function_from_dump():
     mag_dump = data["ff_magnitude"]
     phase_dump = data["ff_phase"]
     theta_sample = float(data["theta_sample_rad"])
+    print("ka max in dump:", float(ka_dump.max()))
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
 
@@ -121,13 +144,127 @@ def plot_form_function_from_dump():
     plt.show()
 
 
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+
+    ax1.plot(ka_dump, mag_dump, "b-", linewidth=1.5)
+    ax1.set_xlabel("ka")
+    ax1.set_ylabel("|f(ka)|")
+    ax1.set_title("Form Function from plugin dump - Magnitude")
+    ax1.grid(True, alpha=0.3)
+    ax1.set_xlim(0, float(ka_dump.max()))
+    ax1.set_ylim(0, 1.5)
+
+    ax2.plot(ka_dump, phase_dump, "r-", linewidth=1.5)
+    ax2.set_xlabel("ka")
+    ax2.set_ylabel("arg[f(ka)] (radians)")
+    ax2.set_title(f"Form Function from plugin dump - Phase (theta={theta_sample:.4f} rad)")
+    ax2.grid(True, alpha=0.3)
+    ax2.set_xlim(0, float(ka_dump.max()))
+    ax2.set_ylim(0, 2 * np.pi)
+    ax2.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+    ax2.set_yticklabels(["0", "pi/2", "pi", "3pi/2", "2pi"])
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_echo_spectrum(trace: np.ndarray, sample_rate: float):
+    n_fft = int(SIM_PARAMS["debug"].get("echo_fft_points", 16384))
+    dt = 1.0 / sample_rate
+
+    echo_fft = np.fft.fft(np.real(trace), n_fft) * dt
+    echo_fft *= 2.0
+
+    freq = np.fft.fftfreq(n_fft, dt)
+    positive = freq >= 0
+    freq_positive = freq[positive]
+    echo_fft_positive = echo_fft[positive]
+
+    c_plot = SIM_PARAMS["environment"]["sound_speed_ms"]
+    a = SIM_PARAMS["rigid_sphere"]["radius_m"]
+    k_positive = 2.0 * np.pi * freq_positive / c_plot
+    ka_positive = k_positive * a
+
+    magnitude = np.abs(echo_fft_positive)
+    phase = np.mod(np.angle(echo_fft_positive) + 2.0 * np.pi, 2.0 * np.pi)
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+
+    ax1.plot(ka_positive, magnitude, "k-", linewidth=1.5)
+    ax1.set_xlabel("ka")
+    ax1.set_ylabel("|E(ka)|")
+    ax1.set_title("Echo spectrum E(ka) - magnitude")
+    ax1.grid(True, alpha=0.3)
+    ax1.set_xlim(0, 30)
+
+    ax2.plot(ka_positive, phase, "k-", linewidth=1.5)
+    ax2.set_xlabel("ka")
+    ax2.set_ylabel("Phase of E(ka) (radians)")
+    ax2.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+    ax2.set_yticklabels(["0", "pi/2", "pi", "3pi/2", "2pi"])
+    ax2.grid(True, alpha=0.3)
+    ax2.set_xlim(0, 30)
+    ax2.set_ylim(0, 2 * np.pi)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_echo_spectrum_hz(trace: np.ndarray, sample_rate: float):
+    n_fft = int(SIM_PARAMS["debug"].get("echo_fft_points", 16384))
+    dt = 1.0 / sample_rate
+
+    E = np.fft.fftshift(np.fft.fft(trace, n_fft))
+    f = np.fft.fftshift(np.fft.fftfreq(n_fft, dt))
+
+    mag = np.abs(E)
+    mag_norm = mag / (np.max(mag) + 1e-30)
+    mag_db = 20.0 * np.log10(np.maximum(mag_norm, 1e-12))
+
+    # Auto window based on energy support
+    keep = mag_norm > 1e-3  # -60 dB
+    if np.any(keep):
+        fmin = float(f[keep].min())
+        fmax = float(f[keep].max())
+    else:
+        fmin = float(f.min())
+        fmax = float(f.max())
+
+    bw = max(fmax - fmin, 1.0)
+    pad = 0.25 * bw
+    x0 = fmin - pad
+    x1 = fmax + pad
+
+    # dB view
+    plt.figure(figsize=(10, 4))
+    plt.plot(f, mag_db, "k-", linewidth=1.2)
+    plt.xlabel("Frequency [Hz]")
+    plt.ylabel("Magnitude [dB, normalized]")
+    plt.title("Echo spectrum in frequency domain")
+    plt.grid(True, alpha=0.3)
+    plt.xlim(0, x1)
+    plt.ylim(-120, 5)
+    plt.tight_layout()
+    plt.show()
+
+    # linear view
+    plt.figure(figsize=(10, 4))
+    plt.plot(f, mag_norm, "g-", linewidth=1.2)
+    plt.xlabel("Frequency [Hz]")
+    plt.ylabel("Magnitude [linear, normalized]")
+    plt.title("Echo spectrum in frequency domain (linear scale)")
+    plt.grid(True, alpha=0.3)
+    plt.xlim(0, x1)
+    plt.ylim(0.0, 1.05)
+    plt.tight_layout()
+    plt.show()
+
+
 def main():
     signal_mode = SIM_PARAMS["signal"]["mode"]
     signal, f0, sim_baseband_frequency = build_signal_from_params(SIM_PARAMS)
 
     if SIM_PARAMS["debug"].get("plot_incident", False):
-        #t, s, sample_rate_plot, title = sample_for_plot(signal, signal_mode, f0)
-        #plot_incident_signal(t, s, title)
 
         # Diagnostic: sample the incident signal on the exact simulation time grid
         # used to generate the echoes in simple_points.npz.
@@ -143,49 +280,49 @@ def main():
         s_sim * np.exp(1j * 2.0 * np.pi * sim_baseband_frequency * t_sim)
         )
 
-        plt.figure(figsize=(10, 4))
-        plt.plot(t_sim * 1e3, s_sim_passband, "c-", linewidth=1.0, label="reconstructed passband")
-        plt.plot(t_sim * 1e3, np.abs(s_sim), "m--", linewidth=1.0, label="abs(baseband)")
-        plt.plot(t_sim * 1e3, -np.abs(s_sim), "m--", linewidth=1.0)
-        plt.xlabel("Time [ms]")
-        plt.ylabel("Amplitude")
-        plt.title("Incident chirp on simulation grid (passband view for visualization)")
-        plt.grid(True, alpha=0.3)
-        plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
-        plt.xlim(0.0, signal.duration * 1e3)
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
-
-        # s_sim_real = np.real(s_sim)
-        # s_sim_mag = np.abs(s_sim)
-
+        # #Uncomment the following block to plot the incident signal on the simulation grid with both the reconstructed passband view and the baseband magnitude envelope.
         # plt.figure(figsize=(10, 4))
-        # plt.plot(t_sim * 1e3, s_sim_real, "g-", linewidth=1.0, label="real(s_sim)")
-        # plt.plot(t_sim * 1e3, s_sim_mag, "m--", linewidth=1.0, label="abs(s_sim)")
-        # plt.plot(t_sim * 1e3, -s_sim_mag, "m--", linewidth=1.0)
+        # plt.plot(t_sim * 1e3, s_sim_passband, "c-", linewidth=1.0, label="reconstructed passband")
+        # plt.plot(t_sim * 1e3, np.abs(s_sim), "m--", linewidth=1.0, label="abs(baseband)")
+        # plt.plot(t_sim * 1e3, -np.abs(s_sim), "m--", linewidth=1.0)
         # plt.xlabel("Time [ms]")
         # plt.ylabel("Amplitude")
-        # plt.title("Incident signal on simulation grid: real part and magnitude envelope")
+        # plt.title("Incident chirp on simulation grid (passband view for visualization)")
         # plt.grid(True, alpha=0.3)
         # plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
+        # plt.xlim(0.0, signal.duration * 1e3)
         # plt.legend()
         # plt.tight_layout()
         # plt.show()
+        # # --------------------
 
-        # plt.figure(figsize=(10, 4))
-        # plt.plot(t_sim * 1e3, np.real(s_sim), "g-", linewidth=1.2)
-        # plt.xlabel("Time [ms]")
-        # plt.ylabel("Amplitude")
-        # plt.title("Incident signal sampled on simulation grid (same grid as echo)")
-        # plt.grid(True, alpha=0.3)
-        # plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
-        # plt.tight_layout()
-        # plt.show()
+        # Durations: emitted chirp vs full hydrophone recording window
+        chirp_duration_s = float(signal.duration)
+        hydro_duration_s = float(t_sim[-1] - t_sim[0]) if len(t_sim) > 1 else 0.0
+        print(f"Chirp duration: {chirp_duration_s*1e3:.2f} ms")
+        print(f"Hydrophone trace duration: {hydro_duration_s*1e3:.2f} ms")
+
+        # Second incident plot: reconstructed passband only, over full recording window
+        plt.figure(figsize=(10, 4))
+        plt.plot(t_sim * 1e3, s_sim_passband, "b-", linewidth=1.0)
+        plt.xlabel("Time [ms]")
+        plt.ylabel("Amplitude")
+        plt.title("Incident chirp reconstructed passband (full hydrophone time window)")
+        plt.grid(True, alpha=0.3)
+        plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
+        plt.xlim(t_sim[0] * 1e3, t_sim[-1] * 1e3)
+        plt.tight_layout()
+        plt.show()
+
 
         if SIM_PARAMS["debug"].get("plot_incident_spectrum", False):
-            #plot_incident_spectrum(s, sample_rate_plot)
             plot_incident_spectrum(s_sim, fs_sim)
+            plot_incident_spectrum_hz(
+                signal=signal,
+                sample_rate=fs_sim,
+                baseband_frequency=sim_baseband_frequency,
+                sample_time=t_sim,
+            )
 
     if SIM_PARAMS["debug"].get("plot_form_function_from_plugin_dump", False):
         plot_form_function_from_dump()
@@ -194,6 +331,7 @@ def main():
         results = np.load("simple_points.npz")
         t_echo = results["sample_time"]
         P_echo = results["pressure"]
+        fs_echo = 1.0 / np.mean(np.diff(t_echo))
 
         ping_to_plot = 5   # cambia aquí el ping que quieras ver
         rx_idx = 0
@@ -201,10 +339,6 @@ def main():
         trace_echo_pb = np.real(
             trace_echo_bb * np.exp(1j * 2.0 * np.pi * sim_baseband_frequency * t_echo)
         )
-
-        #Uncomment the following lines to normalize the echo trace to compare with the paper.
-        #peak = np.max(np.abs(trace_echo_pb))
-        #trace_echo_pb_norm = trace_echo_pb / peak if peak > 0 else trace_echo_pb
 
         plt.figure(figsize=(10, 4))
         plt.plot(t_echo, trace_echo_pb, "k-", linewidth=1.2, label="echo passband (viz)")
@@ -216,19 +350,53 @@ def main():
         plt.legend()
         plt.tight_layout()
         plt.show()
-        # trace_echo = np.real(P_echo[ping_to_plot, rx_idx, :])
-        # peak = np.max(np.abs(trace_echo))
-        # trace_echo_norm = trace_echo / peak if peak > 0 else trace_echo
 
-        # plt.figure(figsize=(10, 4))
-        # plt.plot(t_echo, trace_echo_norm, "k-", linewidth=1.2)
-        # plt.xlabel("Time [s]")
-        # plt.ylabel("Normalized amplitude (signed)")
-        # plt.title(f"Echo (signed, normalized), ping {ping_to_plot}, rx {rx_idx}")
-        # plt.grid(True, alpha=0.3)
-        # plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
-        # plt.tight_layout()
-        # plt.show()
+
+        # Incident signal on the same hydrophone time axis (full trace)-------------------------------------
+        incident_bb_on_echo_grid = signal.sample(t_echo, sim_baseband_frequency)
+        incident_pb_on_echo_grid = np.real(
+            incident_bb_on_echo_grid * np.exp(1j * 2.0 * np.pi * sim_baseband_frequency * t_echo)
+        )
+
+        # Optional normalization for visual comparison
+        inc_peak = np.max(np.abs(incident_pb_on_echo_grid))
+        echo_peak = np.max(np.abs(trace_echo_pb))
+        incident_plot = incident_pb_on_echo_grid / inc_peak if inc_peak > 0 else incident_pb_on_echo_grid
+        echo_plot = trace_echo_pb / echo_peak if echo_peak > 0 else trace_echo_pb
+
+        plt.figure(figsize=(10, 4))
+        plt.plot(t_echo, incident_plot, "b-", linewidth=1.0, alpha=0.9, label="incident passband (normalized)")
+        plt.plot(t_echo, echo_plot, "k-", linewidth=1.2, alpha=0.9, label="echo passband (normalized)")
+        plt.xlabel("Time [s]")
+        plt.ylabel("Amplitude")
+        plt.title("Incident and echo on full hydrophone trace (normalized for comparison)")
+        plt.grid(True, alpha=0.3)
+        plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
+        plt.xlim(t_echo[0], t_echo[-1])
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+
+        #With real amplitudes (no normalization):------------------------------
+        plt.figure(figsize=(10, 4))
+        plt.plot(t_echo, incident_pb_on_echo_grid, "b-", linewidth=1.0, alpha=0.9, label="incident passband")
+        plt.plot(t_echo, trace_echo_pb, "k-", linewidth=1.2, alpha=0.9, label="echo passband")
+        plt.xlabel("Time [s]")
+        plt.ylabel("Amplitude")
+        plt.title("Incident and echo on full hydrophone trace (with real amplitudes)")
+        plt.grid(True, alpha=0.3)
+        plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
+        plt.xlim(t_echo[0], t_echo[-1])
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+
+        if SIM_PARAMS["debug"].get("plot_echo_spectrum", True):
+            plot_echo_spectrum(trace_echo_pb, fs_echo)
+            plot_echo_spectrum_hz(trace_echo_pb, fs_echo)
+
 
     # Theta diagnostic across pings (current simple_points_study geometry).
     results = np.load("simple_points.npz")
