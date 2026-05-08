@@ -95,7 +95,7 @@ print(f"Pulse duration: {n_cycles/f0*1e3:.3f} ms")
 
 # Time parameters
 T_pulse = n_cycles / f0          # Pulse duration [s]
-sample_rate = 100 * f0            # Sampling rate [Hz] (100x Nyquist)
+sample_rate = 10 * f0            # Sampling rate [Hz] (10x Nyquist)
 dt = 1 / sample_rate             # Time step [s]
 
 # Create time vector (start at t=0)
@@ -113,7 +113,7 @@ plt.figure(figsize=(10, 4))
 plt.plot(t * 1e3, incident_signal, 'b-', linewidth=1.5)
 plt.xlabel('Time [ms]')
 plt.ylabel('Amplitude')
-plt.title(f'Incident Signal: {n_cycles}-cycle sinusoid at {f0:.1f} Hz')
+plt.title(f'Incident Signal: {n_cycles}-cycle sinusoid at {f0:.1f} Hz', fontsize=38)
 plt.grid(True, alpha=0.3)
 plt.xlim(-0.05, t_max*1e3)
 plt.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
@@ -275,11 +275,11 @@ if dump_path.exists():
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
     ax1.plot(ka_s, np.abs(ff_sim_s), "k-", lw=1.2, label="SimulatorSTB dump")
     ax1.plot(ka_s, np.abs(ff_ref_s), "r--", lw=1.2, label="RigidSphereEcho recompute")
-    ax1.set_xlabel("ka")
-    ax1.set_ylabel("|f(ka)|")
-    ax1.set_title("Form function magnitude: plugin vs reference")
+    ax1.set_xlabel("ka", fontsize=18)
+    ax1.set_ylabel("|f(ka)|", fontsize=18)
+    ax1.set_title("Form function magnitude: plugin vs reference", fontsize=18)
     ax1.grid(True, alpha=0.3)
-    ax1.legend()
+    ax1.legend(fontsize=18)
 
     ax2.plot(ka_s, np.mod(np.angle(ff_sim_s), 2*np.pi), "k-", lw=1.2, label="SimulatorSTB dump")
     ax2.plot(ka_s, np.mod(np.angle(ff_ref_s), 2*np.pi), "r--", lw=1.2, label="RigidSphereEcho recompute")
@@ -398,39 +398,47 @@ tau = t_scattered * c / a
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
 
 # Plot 1: Physical time (seconds)
-ax1.plot(t_scattered * 1e3, scattered_pulse, 'b-', linewidth=1.5)
-ax1.set_xlabel('Time [ms]')
-ax1.set_ylabel('Normalized Amplitude')
-ax1.set_title('Scattered Pulse - Physical Units')
+ax1.plot(t_scattered * 1e3, scattered_pulse, 'b-', linewidth=1.5, label='Standalone script')
+ax1.set_xlabel('Time [ms]', fontsize=30)
+ax1.set_ylabel('Amplitude (norm.)', fontsize=30)
+ax1.tick_params(axis='x', labelsize=30)
+ax1.tick_params(axis='y', labelsize=30)
+#ax1.set_title('Scattered Pulse - Physical Units')
 ax1.grid(True, linestyle='--', alpha=0.7)
 ax1.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
+ax1.legend(fontsize=26)
 
 # ax1.plot(t_sim_like * 1e3, echo_sim_like, 'k--', linewidth=1.2, label='Simulator-like pipeline')
 # ax1.legend()
 if dump_path.exists():
-    ax1.plot(t_dumpS * 1e3, echo_from_dumpS, 'k--', linewidth=1.2, label='Using S_sim from dump')
-    ax1.legend()
+    ax1.plot(t_dumpS * 1e3, echo_from_dumpS, 'k--', linewidth=1.2, label='Simulator pipeline')
+    ax1.legend(fontsize=26)
 
 ax1.set_ylim(-1.1, 1.1)
 ax1.set_xlim(-1.5, 1.5)
 
+
+
 # Plot 2: Normalized time τ (comparison with paper)
-ax2.plot(tau, scattered_pulse, 'b-', linewidth=1.5)
-ax2.set_xlabel('τ (normalized time: tc/a)')
-ax2.set_ylabel('Ψ(τ) (normalized amplitude)')
-ax2.set_title('Scattered Pulse - Normalized Units (Fig. 6 from Paper)')
+ax2.plot(tau, scattered_pulse, 'b-', linewidth=1.5, label='Standalone script')
+ax2.set_xlabel('τ (normalized time: tc/a)', fontsize=30)
+ax2.set_ylabel('Ψ(τ) Amplitude (norm.)', fontsize=30)
+ax2.tick_params(axis='x', labelsize=30)
+ax2.tick_params(axis='y', labelsize=30)
+#ax2.set_title('Scattered Pulse - Normalized Units (Fig. 6 from Paper)')
 ax2.grid(True, linestyle='--', alpha=0.7)
 
 # ax2.plot(tau_sim_like, echo_sim_like, 'k--', linewidth=1.2, label='Simulator-like pipeline')
 # ax2.legend()
 if dump_path.exists():
-    ax2.plot(tau_dumpS, echo_from_dumpS, 'k--', linewidth=1.2, label='Using S_sim from dump')
-    ax2.legend()
+    ax2.plot(tau_dumpS, echo_from_dumpS, 'k--', linewidth=1.2, label='Simulator pipeline')
+    ax2.legend(fontsize=26)
 
 ax2.set_xlim(-3, 8)
 ax2.set_ylim(-1.1, 1.1)
 ax2.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
 ax2.axvline(x=0, color='k', linestyle='-', linewidth=0.5)
+ax2.legend(fontsize=26)
 
 plt.tight_layout()
 plt.show()
