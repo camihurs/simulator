@@ -17,67 +17,115 @@ def hankel1_sph_deriv(n, x):
     )
 
 
-def modes_solid(n, k1, freqs, x, x1, x2, theta, rho1, rho2, r, field="near-field"):
+def modes_solid(
+    n,
+    k1,
+    freqs,
+    x,
+    x1,
+    x2,
+    theta,
+    rho1,
+    rho2,
+    r,
+    field="far-field",
+    valid_mask=None,
+):
     """
     Modal contribution for a solid elastic sphere.
 
-    This is adapted from ModesSolid in AcousticScattering_Menu_FF_spheres.py.
-    For validation against Hickling (1962), use field="far-field".
-    For echo synthesis, use the near-field expression used by the original menu script.
+    This is adapted from ModesSolid in AcousticScattering_Menu_FF_spheres.py,
+    but vectorized over the frequency axis.
     """
     fn_array = np.zeros(freqs.size, dtype=np.complex128)
+    if valid_mask is None:
+        valid_mask = np.ones(freqs.shape, dtype=bool)
+    if not np.any(valid_mask):
+        return fn_array
 
-    for i in range(len(freqs)):
-        d11 = (rho1 / rho2) * (x2[i] ** 2) * hankel1_spherical(n, x[i])
-        d12 = ((2 * n * (n + 1) - x2[i] ** 2) * spherical_jn(n, x1[i])) - (
-            4 * x1[i] * spherical_jn(n, x1[i], derivative=True)
+    xv = x[valid_mask]
+    x1v = x1[valid_mask]
+    x2v = x2[valid_mask]
+    k1v = k1[valid_mask]
+
+    jn_x = spherical_jn(n, xv)
+    jn_x_deriv = spherical_jn(n, xv, derivative=True)
+    jn_x1 = spherical_jn(n, x1v)
+    jn_x1_deriv = spherical_jn(n, x1v, derivative=True)
+    jn_x2 = spherical_jn(n, x2v)
+    jn_x2_deriv = spherical_jn(n, x2v, derivative=True)
+
+    d11 = (rho1 / rho2) * (x2v**2) * hankel1_spherical(n, xv)
+    d12 = ((2 * n * (n + 1) - x2v**2) * jn_x1) - (4 * x1v * jn_x1_deriv)
+    d13 = 2 * n * (n + 1) * (x2v * jn_x2_deriv - jn_x2)
+    d21 = -xv * hankel1_sph_deriv(n, xv)
+    d22 = x1v * jn_x1_deriv
+    d23 = n * (n + 1) * jn_x2
+    d32 = 2 * (jn_x1 - x1v * jn_x1_deriv)
+    d33 = 2 * x2v * jn_x2_deriv + ((x2v**2 - 2 * n * (n + 1) + 2) * jn_x2)
+    d10 = -(rho1 / rho2) * (x2v**2) * jn_x
+    d20 = xv * jn_x_deriv
+
+    b_matrix = np.zeros((xv.size, 3, 3), dtype=np.complex128)
+    b_matrix[:, 0, 0] = d10
+    b_matrix[:, 0, 1] = d12
+    b_matrix[:, 0, 2] = d13
+    b_matrix[:, 1, 0] = d20
+    b_matrix[:, 1, 1] = d22
+    b_matrix[:, 1, 2] = d23
+    b_matrix[:, 2, 1] = d32
+    b_matrix[:, 2, 2] = d33
+
+    d_matrix = np.zeros((xv.size, 3, 3), dtype=np.complex128)
+    d_matrix[:, 0, 0] = d11
+    d_matrix[:, 0, 1] = d12
+    d_matrix[:, 0, 2] = d13
+    d_matrix[:, 1, 0] = d21
+    d_matrix[:, 1, 1] = d22
+    d_matrix[:, 1, 2] = d23
+    d_matrix[:, 2, 1] = d32
+    d_matrix[:, 2, 2] = d33
+
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        r_determinant = -np.linalg.det(b_matrix) / np.linalg.det(d_matrix)
+
+    r_determinant = np.nan_to_num(r_determinant, nan=0.0, posinf=0.0, neginf=0.0)
+
+    if field == "near-field":
+        values = (
+            (1j**n)
+            * (2 * n + 1)
+            * r_determinant
+            * hankel1_spherical(n, k1v * r)
+            * eval_legendre(n, np.cos(theta))
         )
-        d13 = (
-            2
-            * n
-            * (n + 1)
-            * (x2[i] * spherical_jn(n, x2[i], derivative=True) - spherical_jn(n, x2[i]))
-        )
-        d21 = -x[i] * hankel1_sph_deriv(n, x[i])
-        d22 = x1[i] * spherical_jn(n, x1[i], derivative=True)
-        d23 = n * (n + 1) * spherical_jn(n, x2[i])
-        d32 = 2 * (
-            spherical_jn(n, x1[i]) - x1[i] * spherical_jn(n, x1[i], derivative=True)
-        )
-        d33 = 2 * x2[i] * spherical_jn(n, x2[i], derivative=True) + (
-            (x2[i] ** 2 - 2 * n * (n + 1) + 2) * spherical_jn(n, x2[i])
-        )
-        d10 = -(rho1 / rho2) * (x2[i] ** 2) * spherical_jn(n, x[i])
-        d20 = x[i] * spherical_jn(n, x[i], derivative=True)
+    elif field == "far-field":
+        values = ((-1) ** n) * r_determinant * (2 * n + 1)
+    else:
+        raise ValueError("field must be 'far-field' or 'near-field'")
 
-        b_matrix = np.array([[d10, d12, d13], [d20, d22, d23], [0.0, d32, d33]])
-        d_matrix = np.array([[d11, d12, d13], [d21, d22, d23], [0.0, d32, d33]])
-
-        b_determinant = np.linalg.det(b_matrix)
-        d_determinant = np.linalg.det(d_matrix)
-        r_determinant = -b_determinant / d_determinant
-
-        if not np.isfinite(r_determinant):
-            r_determinant = 0.0
-
-        if field == "near-field":
-            fn_array[i] = (
-                (1j**n)
-                * (2 * n + 1)
-                * r_determinant
-                * hankel1_spherical(n, k1[i] * r)
-                * eval_legendre(n, np.cos(theta))
-            )
-        else:
-            fn_array[i] = ((-1) ** n) * r_determinant * (2 * n + 1)
-
+    fn_array[valid_mask] = np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0)
     return np.nan_to_num(fn_array, nan=0.0, posinf=0.0, neginf=0.0)
 
 
-def compute_modal_sum(freqs, c1, a, cd2, cs2, rho1, rho2, r, n_terms, field):
+def compute_modal_sum(
+    freqs,
+    c1,
+    a,
+    cd2,
+    cs2,
+    rho1,
+    rho2,
+    r,
+    n_terms,
+    field,
+    ka_eps=1e-8,
+):
     freqs = np.asarray(freqs, dtype=float)
     k1 = 2 * np.pi * np.abs(freqs) / c1
-    x = k1 * a
+    x_raw = k1 * a
+    valid_mask = x_raw > ka_eps
+    x = np.maximum(x_raw, ka_eps)
     x1 = (c1 / cd2) * x
     x2 = (c1 / cs2) * x
 
@@ -97,12 +145,22 @@ def compute_modal_sum(freqs, c1, a, cd2, cs2, rho1, rho2, r, n_terms, field):
             rho2=rho2,
             r=r,
             field=field,
+            valid_mask=valid_mask,
         )
 
-    return np.nan_to_num(f_sum, nan=0.0, posinf=0.0, neginf=0.0), x
+    return np.nan_to_num(f_sum, nan=0.0, posinf=0.0, neginf=0.0), x_raw
 
 
-def compute_hickling_form_function(freqs, c1, a, cd2, cs2, rho1, rho2, r, n_terms):
+def scale_far_field_form_function(f_sum, ka, ka_eps=1e-8):
+    form_function = np.zeros_like(f_sum)
+    nonzero = np.abs(ka) > ka_eps
+    form_function[nonzero] = (2 * f_sum[nonzero]) / (1j * ka[nonzero])
+    return np.nan_to_num(form_function, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def compute_hickling_form_function(
+    freqs, c1, a, cd2, cs2, rho1, rho2, r, n_terms, ka_eps=1e-8
+):
     """
     Far-field form function used for comparison with Hickling (1962).
     """
@@ -117,12 +175,31 @@ def compute_hickling_form_function(freqs, c1, a, cd2, cs2, rho1, rho2, r, n_term
         r=r,
         n_terms=n_terms,
         field="far-field",
+        ka_eps=ka_eps,
     )
 
-    form_function = np.zeros_like(f_sum)
-    nonzero = np.abs(ka) > 0
-    form_function[nonzero] = (2 * f_sum[nonzero]) / (1j * ka[nonzero])
-    return np.nan_to_num(form_function, nan=0.0, posinf=0.0, neginf=0.0), ka
+    return scale_far_field_form_function(f_sum, ka, ka_eps=ka_eps), ka
+
+
+def compute_echo_response(
+    freqs, c1, a, cd2, cs2, rho1, rho2, r, n_terms, field, ka_eps
+):
+    f_sum, ka = compute_modal_sum(
+        freqs=freqs,
+        c1=c1,
+        a=a,
+        cd2=cd2,
+        cs2=cs2,
+        rho1=rho1,
+        rho2=rho2,
+        r=r,
+        n_terms=n_terms,
+        field=field,
+        ka_eps=ka_eps,
+    )
+    if field == "far-field":
+        return scale_far_field_form_function(f_sum, ka, ka_eps=ka_eps), ka
+    return f_sum, ka
 
 
 def get_form_function_echo(f_positive):
@@ -145,17 +222,41 @@ reference_paper = (
     "Journal of the Acoustical Society of America, 34(10), 1582-1592."
 )
 
+HICKLING_MATERIALS = {
+    "Beryllium": {"rho2": 1870.0, "cd2": 12890.0, "cs2": 8880.0},
+    "Fused silica": {"rho2": 2200.0, "cd2": 5968.0, "cs2": 3764.0},
+    "Heavy silicate, flint glass": {"rho2": 3880.0, "cd2": 3980.0, "cs2": 2380.0},
+    "Armco iron": {"rho2": 7700.0, "cd2": 5960.0, "cs2": 3240.0},
+    "Monel metal": {"rho2": 8900.0, "cd2": 5350.0, "cs2": 2720.0},
+    "Aluminum": {"rho2": 2700.0, "cd2": 6420.0, "cs2": 3040.0},
+    "Yellow brass": {"rho2": 8600.0, "cd2": 4700.0, "cs2": 2110.0},
+    "Lucite": {"rho2": 1180.0, "cd2": 2680.0, "cs2": 1100.0},
+    "Lead": {"rho2": 11340.0, "cd2": 1960.0, "cs2": 690.0},
+    "Ice": {"rho2": 917.0, "cd2": 2743.0, "cs2": 1433.0},
+}
+
 medium1 = "Water"
-material_sphere = "Beryllium"
+selected_material = "Ice"
+if selected_material not in HICKLING_MATERIALS:
+    raise ValueError(
+        "selected_material must be one of: " + ", ".join(sorted(HICKLING_MATERIALS))
+    )
+
+material_sphere = selected_material
+material_properties = HICKLING_MATERIALS[selected_material]
 
 rho1 = 1000.0  # Water density [kg/m^3]
 c1 = 1410.0  # Water sound speed [m/s]
-rho2 = 1870.0  # Beryllium density [kg/m^3]
-cd2 = 12890.0  # Compressional wave speed in Beryllium [m/s]
-cs2 = 8880.0  # Shear wave speed in Beryllium [m/s]
+rho2 = material_properties["rho2"]  # Sphere density [kg/m^3]
+cd2 = material_properties["cd2"]  # Compressional wave speed in the sphere [m/s]
+cs2 = material_properties["cs2"]  # Shear wave speed in the sphere [m/s]
 a = 0.25  # Sphere radius [m]
 r = 1.73  # Slant range used in the original validation script [m]
 n_terms = 80
+ka_eps = 1e-8
+echo_field = "far-field"  # Options: "far-field" or "near-field".
+# Observation: the far-field form function is validated against Hickling (1962).
+# The far-field echo synthesis is still pending direct validation against a paper echo.
 
 xmin = 0.0
 xmax = 30.0
@@ -173,6 +274,7 @@ print(f"  water sound speed: {c1:.1f} m/s")
 print(f"  rho1/rho2: {rho1:.1f} / {rho2:.1f} kg/m^3")
 print(f"  cd2/cs2: {cd2:.1f} / {cs2:.1f} m/s")
 print(f"  modes: {n_terms}")
+print(f"  echo field: {echo_field}")
 
 
 # ============================================================================
@@ -271,13 +373,14 @@ f_hickling, ka_validation = compute_hickling_form_function(
     rho2=rho2,
     r=r,
     n_terms=n_terms,
+    ka_eps=ka_eps,
 )
 
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
 ax1.plot(ka_validation, np.abs(f_hickling), "k-", linewidth=1.5)
 ax1.set_xlabel("ka")
 ax1.set_ylabel("|f(ka)|")
-ax1.set_title("Solid Beryllium Sphere Form Function - Hickling Far Field")
+ax1.set_title(f"Solid {material_sphere} Sphere Form Function - Hickling Far Field")
 ax1.grid(True, alpha=0.3)
 ax1.set_xlim(0, 30)
 
@@ -296,15 +399,17 @@ plt.show()
 print("\nValidation form function computed:")
 print(f"  material: {material_sphere}")
 print(f"  ka range: {ka_validation.min():.2f} / {ka_validation.max():.2f}")
-print("  Compare this figure against Hickling (1962) solid Beryllium sphere results.")
+print(
+    f"  Compare this figure against Hickling (1962) solid {material_sphere} sphere results."
+)
 
 
 # ============================================================================
-# STEP 5: Compute Solid-Sphere Form Function for Echo Synthesis
+# STEP 5: Compute Solid-Sphere Response for Echo Synthesis
 # ============================================================================
 
-print("\nComputing near-field modal response for echo synthesis...")
-f_echo_positive, x_echo = compute_modal_sum(
+print(f"\nComputing {echo_field} response for echo synthesis...")
+f_echo_positive, x_echo = compute_echo_response(
     freqs=freq_positive,
     c1=c1,
     a=a,
@@ -314,14 +419,15 @@ f_echo_positive, x_echo = compute_modal_sum(
     rho2=rho2,
     r=r,
     n_terms=n_terms,
-    field="near-field",
+    field=echo_field,
+    ka_eps=ka_eps,
 )
 
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
 ax1.plot(x_echo, np.abs(f_echo_positive), "k-", linewidth=1.5)
 ax1.set_xlabel("ka")
-ax1.set_ylabel("|modal sum|")
-ax1.set_title("Solid Beryllium Sphere Modal Response Used for Echo")
+ax1.set_ylabel("|response|")
+ax1.set_title(f"Solid {material_sphere} Sphere {echo_field} Response Used for Echo")
 ax1.grid(True, alpha=0.3)
 ax1.set_xlim(0, 30)
 
@@ -340,7 +446,8 @@ plt.show()
 # STEP 6: Compute Scattered Echo
 # ============================================================================
 
-target = "SolBerylliumSphere"
+material_id = "".join(ch for ch in material_sphere if ch.isalnum())
+target = f"Sol{material_id}Sphere"
 f_echo_full = get_form_function_echo(f_echo_positive)
 
 # Keep the same convention as GetEchoFF in AcousticScattering_Menu_FF_spheres.py:
@@ -350,10 +457,10 @@ scattered_echo = np.fft.ifft(echo_spectrum, n_fft)
 scattered_echo_normalized = scattered_echo / (np.max(np.abs(scattered_echo)) + 1e-15)
 
 t_echo = np.arange(n_fft) / sample_rate
-tau_echo = t_echo * c1 / a
 
 print("\nScattered pulse computed:")
 print(f"  target: {target}")
+print(f"  echo field: {echo_field}")
 print(f"  samples: {len(scattered_echo_normalized)}")
 print(f"  finite ratio: {np.isfinite(scattered_echo_normalized).mean():.3f}")
 print(f"  max abs before normalization: {np.max(np.abs(scattered_echo)):.3e}")
@@ -363,25 +470,15 @@ print(f"  max abs before normalization: {np.max(np.abs(scattered_echo)):.3e}")
 # STEP 7: Visualize Echo
 # ============================================================================
 
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
-
-ax1.plot(t_echo * 1e3, np.real(scattered_echo_normalized), "k-", linewidth=1.5)
-ax1.set_xlabel("Time [ms]")
-ax1.set_ylabel("Amplitude (norm.)")
-ax1.set_title("Solid Beryllium Sphere Echo - Physical Time")
-ax1.grid(True, linestyle="--", alpha=0.7)
-ax1.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
-ax1.set_xlim(0, 3.0)
-ax1.set_ylim(-1.1, 1.1)
-
-ax2.plot(tau_echo, np.real(scattered_echo_normalized), "k-", linewidth=1.5)
-ax2.set_xlabel("Normalized time tc/a")
-ax2.set_ylabel("Amplitude (norm.)")
-ax2.set_title("Solid Beryllium Sphere Echo - Normalized Time")
-ax2.grid(True, linestyle="--", alpha=0.7)
-ax2.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
-ax2.set_xlim(0, 18)
-ax2.set_ylim(-1.1, 1.1)
+plt.figure(figsize=(12, 6))
+plt.plot(t_echo * 1e3, np.real(scattered_echo_normalized), "k-", linewidth=1.5)
+plt.xlabel("Time [ms]")
+plt.ylabel("Amplitude (norm.)")
+plt.title(f"Solid {material_sphere} Sphere Echo - {echo_field}")
+plt.grid(True, linestyle="--", alpha=0.7)
+plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
+plt.xlim(0, 3.0)
+plt.ylim(-1.1, 1.1)
 
 plt.tight_layout()
 plt.show()
