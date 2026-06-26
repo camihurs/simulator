@@ -23,13 +23,18 @@ print("finite ratio:", np.isfinite(P).mean())
 ping_energy = np.max(np.abs(P[:, 0, :]), axis=1)
 ping_idx = int(np.argmax(ping_energy))
 
-ping_to_plot = 5   # cambia aquí el ping que quieras ver
+ping_to_plot = 31   # cambia aquí el ping que quieras ver
 trace = P[ping_to_plot, 0, :]
 plt.figure()
-plt.title(f"Middle receiver (x=0), ping {ping_to_plot}")
-plt.plot(t, 20 * np.log10(np.abs(trace) / 1e-6))
-plt.xlabel("Time (s)")
-plt.ylabel("Echo strength (SPL)")
+#plt.title(f"Middle receiver (x=0), ping {ping_to_plot}")
+spl_db = 20 * np.log10(np.maximum(np.abs(trace), 1e-12) / 1e-6)
+plt.plot(t * 1e3, spl_db, 'k-')  # Convert the time to ms and plot the SPL in dB
+#plt.plot(t, 20 * np.log10(np.abs(trace) / 1e-6))
+plt.xlabel("Time [ms]", fontsize=38)
+#plt.xlabel("Time (s)", fontsize=22)
+plt.ylabel("Echo level [dB re 1 uPa]", fontsize=38) #"Echo strength (SPL)"
+plt.xticks(fontsize=34)
+plt.yticks(fontsize=34)
 plt.show()
 
 # Or an image of all pings recorded on the middle receiver.
@@ -40,11 +45,17 @@ plt.imshow(
     aspect="auto",
     origin="lower",
     interpolation="none",
-    extent=(t[0], t[-1], 0, P.shape[0] - 1),
+    #extent=(t[0], t[-1], 0, P.shape[0] - 1),
+    extent=(t[0] * 1e3, t[-1] * 1e3, 0, P.shape[0] - 1),
     #vmin=100,
 )
-plt.colorbar(label="Echo strength (SPL)")
-plt.xlabel("Time (s)")
-plt.ylabel("Ping")
-plt.title("Middle receiver (x=0)")
+#plt.colorbar(label="Echo level [dB re 1 uPa]", fontsize=22) #"Echo strength (SPL)"
+cbar = plt.colorbar()
+cbar.set_label("Echo level [dB re 1 uPa]", fontsize=38)
+cbar.ax.tick_params(labelsize=34)
+plt.xlabel("Time [ms]", fontsize=38)
+plt.ylabel("Ping", fontsize=38)
+#plt.title("Middle receiver (x=0)")
+plt.xticks(fontsize=34)
+plt.yticks(fontsize=34)
 plt.show()

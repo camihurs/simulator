@@ -139,7 +139,9 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
                 "name": "single_point",
                 "parameters": {
                     #"position": (5, 500, 10), #Longer distance, to try to see the effect of the Anslie attenuation plugin.
+                    #"position": (5, 15, 10),
                     "position": (5, 40, 10),
+                    #"position": (5, 8, 3),
                     "reflectivity": 1,
                 },
             }
@@ -149,30 +151,47 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # Use the stop-and-hop approximation when calculating the travel time of the pulse.
     config["travel_time"] = loader.travel_time(
         {
-            "name": "stop_and_hop",
-            "parameters": {},
+            "name": "iterative",
+            "parameters": {
+                "max_iterations": 20,
+                "tolerance": 1e-8,
+            },
+
+            # "name": "stop_and_hop",
+            # "parameters": {},
         }
     )
 
     # Apply two distortions: spherical spreading (1/r scaling to the amplitude on
     # each direction) and acoustic attenuation.
     config["distortion"] = [
-        # loader.distortion(
-        #     {
-        #         "name": "geometric_spreading",
-        #         "parameters": {
-        #             "power": 1.0,
-        #         },
-        #     }
-        # ),
-        # loader.distortion(
-        #     {
-        #         "name": "anslie_mccolm_attenuation",
-        #         "parameters": {
-        #             "frequency": "centre",
-        #         },
-        #     }
-        # ),
+        loader.distortion(
+            {
+                "name": "geometric_spreading",
+                "parameters": {
+                    "power": 1.0,
+                },
+            }
+        ),
+
+        loader.distortion(
+            {
+                "name": "anslie_mccolm_attenuation",
+                "parameters": {
+                    "frequency": "centre",
+                },
+            }
+        ),
+
+        loader.distortion(
+            {
+                "name": "doppler",
+                "parameters": {
+                    "calculate_c_rx": True
+                },
+            }
+        ),
+
         loader.distortion(
         {
             "name": "RigidSphereFormFunction:openstb.simulator.distortion.rigid_sphere",
@@ -190,7 +209,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
 
     #signal, _, sim_baseband_frequency = build_signal_from_params(SIM_PARAMS)
     signal, f0, sim_baseband_frequency = build_signal_from_params(SIM_PARAMS)
-    sample_rate_sim = (100.0 * f0) if f0 is not None else 30e3
+    sample_rate_sim = (10.0 * f0) if f0 is not None else 30e3
 
 
     # Set the desired orientation of the transducers. Without rotation, the normal of

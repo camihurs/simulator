@@ -1,9 +1,11 @@
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.special import spherical_jn, spherical_yn, eval_legendre
 from pathlib import Path
 
-#Versión robusta para evitar NaN/Inf cerca de ka=0
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.special import eval_legendre, spherical_jn, spherical_yn
+
+
+# Versión robusta para evitar NaN/Inf cerca de ka=0
 def compute_form_function(ka_values, theta=np.pi, ka_eps=1e-8):
     """
     Compute form function f(ka) for rigid sphere (robust near ka=0).
@@ -29,7 +31,7 @@ def compute_form_function(ka_values, theta=np.pi, ka_eps=1e-8):
 
         f += coeff_n * Pn
 
-    f *= (2.0 / ka_safe)
+    f *= 2.0 / ka_safe
     f = -f
     f = np.nan_to_num(f, nan=0.0, posinf=0.0, neginf=0.0)
     return f
@@ -74,8 +76,8 @@ def compute_form_function(ka_values, theta=np.pi, ka_eps=1e-8):
 N_terms = 80  # Number of terms in series (same as your original code)
 
 # Physical constants
-c = 1480.0              # Sound speed [m/s]
-a = 0.25                # Sphere radius [m]
+c = 1480.0  # Sound speed [m/s]
+a = 0.25  # Sphere radius [m]
 
 # Signal parameters (from paper: k0a = 15.0, 2 cycles)
 k0a = 15.0
@@ -83,10 +85,9 @@ f0 = k0a * c / (2 * np.pi * a)  # Center frequency [Hz]
 n_cycles = 2
 
 print(f"Center frequency: f0 = {f0:.1f} Hz")
-print(f"Wavelength: λ = {c/f0:.3f} m")
-print(f"Period: T = {1/f0*1e3:.3f} ms")
-print(f"Pulse duration: {n_cycles/f0*1e3:.3f} ms")
-
+print(f"Wavelength: λ = {c / f0:.3f} m")
+print(f"Period: T = {1 / f0 * 1e3:.3f} ms")
+print(f"Pulse duration: {n_cycles / f0 * 1e3:.3f} ms")
 
 
 # ============================================================================
@@ -94,13 +95,13 @@ print(f"Pulse duration: {n_cycles/f0*1e3:.3f} ms")
 # ============================================================================
 
 # Time parameters
-T_pulse = n_cycles / f0          # Pulse duration [s]
-sample_rate = 10 * f0            # Sampling rate [Hz] (10x Nyquist)
-dt = 1 / sample_rate             # Time step [s]
+T_pulse = n_cycles / f0  # Pulse duration [s]
+sample_rate = 10 * f0  # Sampling rate [Hz] (10x Nyquist)
+dt = 1 / sample_rate  # Time step [s]
 
 # Create time vector (start at t=0)
-t_max = 3 * T_pulse              # Extended for visualization
-t = np.arange(0, t_max, dt)      # Time vector [s]
+t_max = 3 * T_pulse  # Extended for visualization
+t = np.arange(0, t_max, dt)  # Time vector [s]
 
 # Generate 2-cycle truncated sinusoid
 incident_signal = np.where(t < T_pulse, np.sin(2 * np.pi * f0 * t), 0)
@@ -110,20 +111,19 @@ incident_signal = np.where(t < T_pulse, np.sin(2 * np.pi * f0 * t), 0)
 # Visualize incident signal
 # ============================================================================
 plt.figure(figsize=(10, 4))
-plt.plot(t * 1e3, incident_signal, 'b-', linewidth=1.5)
-plt.xlabel('Time [ms]')
-plt.ylabel('Amplitude')
-plt.title(f'Incident Signal: {n_cycles}-cycle sinusoid at {f0:.1f} Hz', fontsize=38)
+plt.plot(t * 1e3, incident_signal, "b-", linewidth=1.5)
+plt.xlabel("Time [ms]")
+plt.ylabel("Amplitude")
+plt.title(f"Incident Signal: {n_cycles}-cycle sinusoid at {f0:.1f} Hz", fontsize=38)
 plt.grid(True, alpha=0.3)
-plt.xlim(-0.05, t_max*1e3)
-plt.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
+plt.xlim(-0.05, t_max * 1e3)
+plt.axhline(y=0, color="k", linestyle="-", linewidth=0.5)
 plt.show()
 
-print(f"\nSignal generated:")
+print("\nSignal generated:")
 print(f"  - Samples: {len(t)}")
-print(f"  - Duration: {t_max*1e3:.2f} ms")
+print(f"  - Duration: {t_max * 1e3:.2f} ms")
 print(f"  - Sample rate: {sample_rate:.1f} Hz")
-
 
 
 # ============================================================================
@@ -131,9 +131,9 @@ print(f"  - Sample rate: {sample_rate:.1f} Hz")
 # ============================================================================
 
 # FFT parameters
-#n_fft = 282880. Para comparar con SimulatorSTB
-n_fft = 16384                     # FFT points (Originally 8192). 16384 is to get a good resolution in the form function.
-freq = np.fft.fftfreq(n_fft, dt) # Frequency vector [Hz]
+# n_fft = 282880. Para comparar con SimulatorSTB
+n_fft = 16384  # FFT points (Originally 8192). 16384 is to get a good resolution in the form function.
+freq = np.fft.fftfreq(n_fft, dt)  # Frequency vector [Hz]
 
 # Compute FFT
 incident_fft = np.fft.fft(incident_signal, n_fft) * dt  # Scale by dt
@@ -151,8 +151,7 @@ k_positive = 2 * np.pi * freq_positive / c
 # Calculate magnitude and phase
 magnitude = np.abs(incident_fft_positive)
 phase = np.angle(incident_fft_positive)
-phase = np.mod(phase + 2*np.pi, 2*np.pi)  # Wrap to [0, 2π]
-
+phase = np.mod(phase + 2 * np.pi, 2 * np.pi)  # Wrap to [0, 2π]
 
 
 # ============================================================================
@@ -162,33 +161,34 @@ fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
 
 # Magnitude vs ka
 ka_positive = k_positive * a
-print(f"RigidSphereEcho ka min/max used for FF: {ka_positive.min():.6f} / {ka_positive.max():.6f}")
-ax1.plot(ka_positive, magnitude, 'b-', linewidth=1.5)
-ax1.set_xlabel('ka')
-ax1.set_ylabel('|g(ka)|')
-ax1.set_title(f'Spectrum g(ka) of a {n_cycles}-cycle pulse with k₀a = {k0a}')
+print(
+    f"RigidSphereEcho ka min/max used for FF: {ka_positive.min():.6f} / {ka_positive.max():.6f}"
+)
+ax1.plot(ka_positive, magnitude, "b-", linewidth=1.5)
+ax1.set_xlabel("ka")
+ax1.set_ylabel("|g(ka)|")
+ax1.set_title(f"Spectrum g(ka) of a {n_cycles}-cycle pulse with k₀a = {k0a}")
 ax1.grid(True, alpha=0.3)
 ax1.set_xlim(0, 30)
 
 # Phase vs ka
-ax2.plot(ka_positive, phase, 'r-', linewidth=1.5)
-ax2.set_xlabel('ka')
-ax2.set_ylabel('Phase of g(ka) (radians)')
-ax2.set_yticks([0, np.pi/2, np.pi, 3*np.pi/2, 2*np.pi])
-ax2.set_yticklabels(['0', 'π/2', 'π', '3π/2', '2π'])
+ax2.plot(ka_positive, phase, "r-", linewidth=1.5)
+ax2.set_xlabel("ka")
+ax2.set_ylabel("Phase of g(ka) (radians)")
+ax2.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+ax2.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
 ax2.grid(True, alpha=0.3)
 ax2.set_xlim(0, 30)
-ax2.set_ylim(0, 2*np.pi)
+ax2.set_ylim(0, 2 * np.pi)
 
 plt.tight_layout()
 plt.show()
 
-print(f"\nSpectrum computed:")
+print("\nSpectrum computed:")
 print(f"  - FFT points: {n_fft}")
 print(f"  - Frequency resolution: {freq_positive[1]:.2f} Hz")
-print(f"  - Max frequency: {freq_positive[-1]/1e3:.1f} kHz")
-print(f"  - k₀a value at f₀: {(2*np.pi*f0/c)*a:.2f}")
-
+print(f"  - Max frequency: {freq_positive[-1] / 1e3:.1f} kHz")
+print(f"  - k₀a value at f₀: {(2 * np.pi * f0 / c) * a:.2f}")
 
 
 # ============================================================================
@@ -204,10 +204,10 @@ f_ka = np.concatenate([[0], f_ka])  # Add zero at ka=0
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
 
 # Magnitude
-ax1.plot(ka_positive, np.abs(f_ka), 'b-', linewidth=1.5)
-ax1.set_xlabel('ka')
-ax1.set_ylabel('|f(ka)|')
-ax1.set_title('Form Function for Rigid Sphere (Backscattering) - Magnitude')
+ax1.plot(ka_positive, np.abs(f_ka), "b-", linewidth=1.5)
+ax1.set_xlabel("ka")
+ax1.set_ylabel("|f(ka)|")
+ax1.set_title("Form Function for Rigid Sphere (Backscattering) - Magnitude")
 ax1.grid(True, alpha=0.3)
 ax1.set_xlim(0, 14)
 ax1.set_ylim(0, 1.5)
@@ -215,36 +215,41 @@ ax1.set_ylim(0, 1.5)
 # Phase
 phase_f = np.angle(f_ka)
 # Phase (wrap to [0, 2π] like in the paper)
-phase_f = np.mod(phase_f, 2*np.pi)  # Wrap to [0, 2π]
+phase_f = np.mod(phase_f, 2 * np.pi)  # Wrap to [0, 2π]
 
-ax2.plot(ka_positive, phase_f, 'r-', linewidth=1.5)
-ax2.set_xlabel('ka')
-ax2.set_ylabel('arg[f(ka)] (radians)')
-ax2.set_title('Form Function for Rigid Sphere (Backscattering) - Phase')
+ax2.plot(ka_positive, phase_f, "r-", linewidth=1.5)
+ax2.set_xlabel("ka")
+ax2.set_ylabel("arg[f(ka)] (radians)")
+ax2.set_title("Form Function for Rigid Sphere (Backscattering) - Phase")
 ax2.grid(True, alpha=0.3)
 ax2.set_xlim(0, 14)
-ax2.set_ylim(0, 2*np.pi)
-ax2.set_yticks([0, np.pi/2, np.pi, 3*np.pi/2, 2*np.pi])
-ax2.set_yticklabels(['0', 'π/2', 'π', '3π/2', '2π'])
+ax2.set_ylim(0, 2 * np.pi)
+ax2.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+ax2.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
 
 plt.tight_layout()
 plt.show()
 
-print(f"\nForm function computed:")
+print("\nForm function computed:")
 print(f"  - Number of terms: {N_terms}")
-print(f"  - Scattering angle: θ = π (backscattering)")
-
+print("  - Scattering angle: θ = π (backscattering)")
 
 
 # ============================================================================
 # STEP 4B: Compare form function vs SimulatorSTB plugin dump
 # ============================================================================
-dump_path = Path(__file__).resolve().parents[3] / "simple_points_study" / "rigid_sphere_ff_debug.npz"
+dump_path = (
+    Path(__file__).resolve().parents[3]
+    / "simple_points_study"
+    / "rigid_sphere_ff_debug.npz"
+)
 
 if dump_path.exists():
     d = np.load(dump_path)
     ka_sim = d["ka"]
-    print(f"SimulatorSTB dump ka min/max used for FF: {ka_sim.min():.6f} / {ka_sim.max():.6f}")
+    print(
+        f"SimulatorSTB dump ka min/max used for FF: {ka_sim.min():.6f} / {ka_sim.max():.6f}"
+    )
     ff_sim = d["ff_complex"]
     theta_sim = float(d["theta_sample_rad"])
 
@@ -281,8 +286,20 @@ if dump_path.exists():
     ax1.grid(True, alpha=0.3)
     ax1.legend(fontsize=18)
 
-    ax2.plot(ka_s, np.mod(np.angle(ff_sim_s), 2*np.pi), "k-", lw=1.2, label="SimulatorSTB dump")
-    ax2.plot(ka_s, np.mod(np.angle(ff_ref_s), 2*np.pi), "r--", lw=1.2, label="RigidSphereEcho recompute")
+    ax2.plot(
+        ka_s,
+        np.mod(np.angle(ff_sim_s), 2 * np.pi),
+        "k-",
+        lw=1.2,
+        label="SimulatorSTB dump",
+    )
+    ax2.plot(
+        ka_s,
+        np.mod(np.angle(ff_ref_s), 2 * np.pi),
+        "r--",
+        lw=1.2,
+        label="RigidSphereEcho recompute",
+    )
     ax2.set_xlabel("ka")
     ax2.set_ylabel("arg[f(ka)]")
     ax2.set_title("Form function phase: plugin vs reference")
@@ -309,9 +326,9 @@ if dump_path.exists():
     S_rs = np.fft.fftshift(np.fft.fft(incident_signal, n_fft))
 
     # Interpolate RigidSphereEcho spectrum onto simulator frequency grid
-    S_rs_interp = np.interp(f_sim, f_rs, np.real(S_rs), left=0.0, right=0.0) + 1j * np.interp(
-        f_sim, f_rs, np.imag(S_rs), left=0.0, right=0.0
-    )
+    S_rs_interp = np.interp(
+        f_sim, f_rs, np.real(S_rs), left=0.0, right=0.0
+    ) + 1j * np.interp(f_sim, f_rs, np.imag(S_rs), left=0.0, right=0.0)
 
     # Relative magnitude error
     num = np.linalg.norm(np.abs(S_rs_interp) - np.abs(S_sim))
@@ -320,7 +337,9 @@ if dump_path.exists():
 
     # Phase error only where spectrum is significant
     mask = np.abs(S_sim) > (np.max(np.abs(S_sim)) * 1e-6)
-    phase_diff = np.angle(np.exp(1j * (np.angle(S_rs_interp[mask]) - np.angle(S_sim[mask]))))
+    phase_diff = np.angle(
+        np.exp(1j * (np.angle(S_rs_interp[mask]) - np.angle(S_sim[mask])))
+    )
     rms_phase_S = np.sqrt(np.mean(phase_diff**2)) if np.any(mask) else np.nan
 
     print("\nS spectrum comparison (SimulatorSTB input vs RigidSphereEcho):")
@@ -347,11 +366,19 @@ scattered_pulse = np.fft.fftshift(scattered_pulse)
 
 
 # --- Diagnostic branch: rebuild echo using S_in_complex dumped from SimulatorSTB ---
-dump_path = Path(__file__).resolve().parents[3] / "simple_points_study" / "rigid_sphere_ff_debug.npz"
+dump_path = (
+    Path(__file__).resolve().parents[3]
+    / "simple_points_study"
+    / "rigid_sphere_ff_debug.npz"
+)
 if dump_path.exists():
     d2 = np.load(dump_path)
-    f_sim = np.asarray(d2["f_hz"], dtype=float)                 # shifted frequency grid used in simulator
-    S_sim = np.asarray(d2["S_in_complex"], dtype=np.complex128) # actual input spectrum seen by plugin
+    f_sim = np.asarray(
+        d2["f_hz"], dtype=float
+    )  # shifted frequency grid used in simulator
+    S_sim = np.asarray(
+        d2["S_in_complex"], dtype=np.complex128
+    )  # actual input spectrum seen by plugin
     theta_sim = float(d2["theta_sample_rad"])
 
     ka_sim_full = np.abs(2.0 * np.pi * f_sim * a / c)
@@ -380,8 +407,8 @@ if dump_path.exists():
 # Create proper time axis
 n_samples = len(scattered_pulse)
 dk = ka_positive[1] - ka_positive[0]  # Step in ka
-dt_scattered = 2*np.pi / (n_samples * dk * c / a)  # Time step
-t_scattered = np.arange(-n_samples//2, n_samples//2) * dt_scattered
+dt_scattered = 2 * np.pi / (n_samples * dk * c / a)  # Time step
+t_scattered = np.arange(-n_samples // 2, n_samples // 2) * dt_scattered
 
 print("finite ratio scattered_pulse:", np.isfinite(scattered_pulse).mean())
 print("max abs scattered_pulse:", np.max(np.abs(scattered_pulse)))
@@ -398,54 +425,61 @@ tau = t_scattered * c / a
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
 
 # Plot 1: Physical time (seconds)
-ax1.plot(t_scattered * 1e3, scattered_pulse, 'b-', linewidth=1.5, label='Standalone script')
-ax1.set_xlabel('Time [ms]', fontsize=30)
-ax1.set_ylabel('Amplitude (norm.)', fontsize=30)
-ax1.tick_params(axis='x', labelsize=30)
-ax1.tick_params(axis='y', labelsize=30)
-#ax1.set_title('Scattered Pulse - Physical Units')
-ax1.grid(True, linestyle='--', alpha=0.7)
-ax1.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
+ax1.plot(
+    t_scattered * 1e3, scattered_pulse, "b-", linewidth=1.5, label="Standalone script"
+)
+ax1.set_xlabel("Time [ms]", fontsize=30)
+ax1.set_ylabel("Amplitude (norm.)", fontsize=30)
+ax1.tick_params(axis="x", labelsize=30)
+ax1.tick_params(axis="y", labelsize=30)
+# ax1.set_title('Scattered Pulse - Physical Units')
+ax1.grid(True, linestyle="--", alpha=0.7)
+ax1.axhline(y=0, color="k", linestyle="-", linewidth=0.5)
 ax1.legend(fontsize=26)
 
 # ax1.plot(t_sim_like * 1e3, echo_sim_like, 'k--', linewidth=1.2, label='Simulator-like pipeline')
 # ax1.legend()
 if dump_path.exists():
-    ax1.plot(t_dumpS * 1e3, echo_from_dumpS, 'k--', linewidth=1.2, label='Simulator pipeline')
+    ax1.plot(
+        t_dumpS * 1e3, echo_from_dumpS, "k--", linewidth=1.2, label="Simulator pipeline"
+    )
     ax1.legend(fontsize=26)
 
 ax1.set_ylim(-1.1, 1.1)
 ax1.set_xlim(-1.5, 1.5)
 
 
-
 # Plot 2: Normalized time τ (comparison with paper)
-ax2.plot(tau, scattered_pulse, 'b-', linewidth=1.5, label='Standalone script')
-ax2.set_xlabel('τ (normalized time: tc/a)', fontsize=30)
-ax2.set_ylabel('Ψ(τ) Amplitude (norm.)', fontsize=30)
-ax2.tick_params(axis='x', labelsize=30)
-ax2.tick_params(axis='y', labelsize=30)
-#ax2.set_title('Scattered Pulse - Normalized Units (Fig. 6 from Paper)')
-ax2.grid(True, linestyle='--', alpha=0.7)
+ax2.plot(tau, scattered_pulse, "b-", linewidth=1.5, label="Standalone script")
+ax2.set_xlabel("τ (normalized time: tc/a)", fontsize=30)
+ax2.set_ylabel("Ψ(τ) Amplitude (norm.)", fontsize=30)
+ax2.tick_params(axis="x", labelsize=30)
+ax2.tick_params(axis="y", labelsize=30)
+# ax2.set_title('Scattered Pulse - Normalized Units (Fig. 6 from Paper)')
+ax2.grid(True, linestyle="--", alpha=0.7)
 
 # ax2.plot(tau_sim_like, echo_sim_like, 'k--', linewidth=1.2, label='Simulator-like pipeline')
 # ax2.legend()
 if dump_path.exists():
-    ax2.plot(tau_dumpS, echo_from_dumpS, 'k--', linewidth=1.2, label='Simulator pipeline')
+    ax2.plot(
+        tau_dumpS, echo_from_dumpS, "k--", linewidth=1.2, label="Simulator pipeline"
+    )
     ax2.legend(fontsize=26)
 
 ax2.set_xlim(-3, 8)
 ax2.set_ylim(-1.1, 1.1)
-ax2.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
-ax2.axvline(x=0, color='k', linestyle='-', linewidth=0.5)
+ax2.axhline(y=0, color="k", linestyle="-", linewidth=0.5)
+ax2.axvline(x=0, color="k", linestyle="-", linewidth=0.5)
 ax2.legend(fontsize=26)
 
 plt.tight_layout()
 plt.show()
 
-print(f"\nScattered pulse computed:")
+print("\nScattered pulse computed:")
 print(f"  - Samples: {len(scattered_pulse)}")
 print(f"  - τ range: [{tau[0]:.2f}, {tau[-1]:.2f}]")
-print(f"  - Physical time range: [{t_scattered[0]*1e3:.2f}, {t_scattered[-1]*1e3:.2f}] ms")
-print(f"  - Expected specular at: τ ≈ -2 (t ≈ {-2*a/c*1e3:.3f} ms)")
-print(f"  - Expected creeping wave at: τ ≈ π (t ≈ {np.pi*a/c*1e3:.3f} ms)")
+print(
+    f"  - Physical time range: [{t_scattered[0] * 1e3:.2f}, {t_scattered[-1] * 1e3:.2f}] ms"
+)
+print(f"  - Expected specular at: τ ≈ -2 (t ≈ {-2 * a / c * 1e3:.3f} ms)")
+print(f"  - Expected creeping wave at: τ ≈ π (t ≈ {np.pi * a / c * 1e3:.3f} ms)")
