@@ -132,7 +132,8 @@ print(f"  - Sample rate: {sample_rate:.1f} Hz")
 
 # FFT parameters
 # n_fft = 282880. Para comparar con SimulatorSTB
-n_fft = 16384  # FFT points (Originally 8192). 16384 is to get a good resolution in the form function.
+n_fft = 16384  # FFT points (Originally 8192). 16384 is to get a good resolution
+# in the form function.
 freq = np.fft.fftfreq(n_fft, dt)  # Frequency vector [Hz]
 
 # Compute FFT
@@ -162,7 +163,8 @@ fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
 # Magnitude vs ka
 ka_positive = k_positive * a
 print(
-    f"RigidSphereEcho ka min/max used for FF: {ka_positive.min():.6f} / {ka_positive.max():.6f}"
+    f"RigidSphereEcho ka min/max used for FF: {ka_positive.min():.6f} "
+    f"/ {ka_positive.max():.6f}"
 )
 ax1.plot(ka_positive, magnitude, "b-", linewidth=1.5)
 ax1.set_xlabel("ka")
@@ -248,7 +250,8 @@ if dump_path.exists():
     d = np.load(dump_path)
     ka_sim = d["ka"]
     print(
-        f"SimulatorSTB dump ka min/max used for FF: {ka_sim.min():.6f} / {ka_sim.max():.6f}"
+        f"SimulatorSTB dump ka min/max used for FF: {ka_sim.min():.6f}"
+        f" / {ka_sim.max():.6f}"
     )
     ff_sim = d["ff_complex"]
     theta_sim = float(d["theta_sample_rad"])
@@ -437,7 +440,8 @@ ax1.grid(True, linestyle="--", alpha=0.7)
 ax1.axhline(y=0, color="k", linestyle="-", linewidth=0.5)
 ax1.legend(fontsize=26)
 
-# ax1.plot(t_sim_like * 1e3, echo_sim_like, 'k--', linewidth=1.2, label='Simulator-like pipeline')
+# ax1.plot(t_sim_like * 1e3, echo_sim_like, 'k--', linewidth=1.2,
+# label='Simulator-like pipeline')
 # ax1.legend()
 if dump_path.exists():
     ax1.plot(
@@ -458,7 +462,8 @@ ax2.tick_params(axis="y", labelsize=30)
 # ax2.set_title('Scattered Pulse - Normalized Units (Fig. 6 from Paper)')
 ax2.grid(True, linestyle="--", alpha=0.7)
 
-# ax2.plot(tau_sim_like, echo_sim_like, 'k--', linewidth=1.2, label='Simulator-like pipeline')
+# ax2.plot(tau_sim_like, echo_sim_like, 'k--', linewidth=1.2,
+#  label='Simulator-like pipeline')
 # ax2.legend()
 if dump_path.exists():
     ax2.plot(
@@ -479,7 +484,8 @@ print("\nScattered pulse computed:")
 print(f"  - Samples: {len(scattered_pulse)}")
 print(f"  - τ range: [{tau[0]:.2f}, {tau[-1]:.2f}]")
 print(
-    f"  - Physical time range: [{t_scattered[0] * 1e3:.2f}, {t_scattered[-1] * 1e3:.2f}] ms"
+    f"  - Physical time range: [{t_scattered[0] * 1e3:.2f},\
+          {t_scattered[-1] * 1e3:.2f}] ms"
 )
 print(f"  - Expected specular at: τ ≈ -2 (t ≈ {-2 * a / c * 1e3:.3f} ms)")
 print(f"  - Expected creeping wave at: τ ≈ π (t ≈ {np.pi * a / c * 1e3:.3f} ms)")
