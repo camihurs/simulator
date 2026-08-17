@@ -235,8 +235,53 @@ HICKLING_MATERIALS = {
     "Ice": {"rho2": 917.0, "cd2": 2743.0, "cs2": 1433.0},
 }
 
+SOURCE_CASES = {
+    "general": {
+        "description": "General 2-cycle truncated sinusoid, not tied to a paper echo.",
+        "n_cycles": 2,
+        "k0a": 15.0,
+        "integration_ka_bounds": None,
+    },
+    "hickling_fig16_max": {
+        "description": "Hickling Fig. 16, maximum of |f|, Armco iron.",
+        "n_cycles": 5,
+        "k0a": 24.5,
+        "integration_ka_bounds": (10.0, 40.0),
+    },
+    "hickling_fig16_min": {
+        "description": "Hickling Fig. 16, minimum of |f|, Armco iron.",
+        "n_cycles": 5,
+        "k0a": 25.5,
+        "integration_ka_bounds": (10.0, 40.0),
+    },
+    "hickling_fig17_max": {
+        "description": "Hickling Fig. 17, maximum of |f|, Armco iron.",
+        "n_cycles": 25,
+        "k0a": 24.5,
+        "integration_ka_bounds": (15.0, 35.0),
+    },
+    "hickling_fig17_min": {
+        "description": "Hickling Fig. 17, minimum of |f|, Armco iron.",
+        "n_cycles": 25,
+        "k0a": 25.5,
+        "integration_ka_bounds": (15.0, 35.0),
+    },
+    "hickling_fig18_max": {
+        "description": "Hickling Fig. 18, maximum of |f|, Armco iron.",
+        "n_cycles": 50,
+        "k0a": 24.5,
+        "integration_ka_bounds": (15.0, 35.0),
+    },
+    "hickling_fig18_min": {
+        "description": "Hickling Fig. 18, minimum of |f|, Armco iron.",
+        "n_cycles": 50,
+        "k0a": 25.5,
+        "integration_ka_bounds": (15.0, 35.0),
+    },
+}
+
 medium1 = "Water"
-selected_material = "Ice"
+selected_material = "Armco iron"
 if selected_material not in HICKLING_MATERIALS:
     raise ValueError(
         "selected_material must be one of: " + ", ".join(sorted(HICKLING_MATERIALS))
@@ -255,6 +300,20 @@ r = 1.73  # Slant range used in the original validation script [m]
 n_terms = 80
 ka_eps = 1e-8
 echo_field = "far-field"  # Options: "far-field" or "near-field".
+selected_source_case = "hickling_fig16_min"
+if selected_source_case not in SOURCE_CASES:
+    raise ValueError(
+        "selected_source_case must be one of: " + ", ".join(sorted(SOURCE_CASES))
+    )
+source_case = SOURCE_CASES[selected_source_case]
+is_hickling_source_case = selected_source_case.startswith("hickling")
+if is_hickling_source_case and selected_material != "Armco iron":
+    warnings.warn(
+        "Hickling Figs. 16-18 use Armco iron. "
+        f"Current selected_material is {selected_material!r}.",
+        UserWarning,
+    )
+
 # Observation: the far-field form function is validated against Hickling (1962).
 # The far-field echo synthesis is still pending direct validation against a paper echo.
 
@@ -275,16 +334,19 @@ print(f"  rho1/rho2: {rho1:.1f} / {rho2:.1f} kg/m^3")
 print(f"  cd2/cs2: {cd2:.1f} / {cs2:.1f} m/s")
 print(f"  modes: {n_terms}")
 print(f"  echo field: {echo_field}")
+print(f"  source case: {selected_source_case}")
+print(f"  source description: {source_case['description']}")
 
 
 # ============================================================================
 # STEP 2: Generate Incident Signal (time domain)
 # ============================================================================
 
-# First echo source: same style as RigidSphereEcho.py, a 2-cycle truncated sine.
-k0a = 15.0
+# The "general" case preserves the first source used in this script. The Hickling
+# cases reproduce the truncated sinusoid parameters from Figs. 16-18.
+k0a = source_case["k0a"]
 f0 = k0a * c1 / (2 * np.pi * a)
-n_cycles = 2
+n_cycles = source_case["n_cycles"]
 T_pulse = n_cycles / f0
 sample_rate = 10 * f0
 dt = 1 / sample_rate
@@ -298,16 +360,81 @@ print(f"  k0a: {k0a:.1f}")
 print(f"  cycles: {n_cycles}")
 print(f"  pulse duration: {T_pulse * 1e3:.3f} ms")
 print(f"  sample rate: {sample_rate:.1f} Hz")
+source_plot_ka_max = 30
+if source_case["integration_ka_bounds"] is None:
+    print("  integration ka bounds: full FFT positive-frequency range")
+else:
+    ka_min, ka_max = source_case["integration_ka_bounds"]
+    print(f"  integration ka bounds: {ka_min:g}-{ka_max:g}")
+    source_plot_ka_max = max(source_plot_ka_max, ka_max + 5)
 
-plt.figure(figsize=(10, 4))
-plt.plot(t * 1e3, incident_signal, "k-", linewidth=1.5)
-plt.xlabel("Time [ms]")
-plt.ylabel("Amplitude")
-plt.title(f"Incident Signal: {n_cycles}-cycle sinusoid at {f0:.1f} Hz")
-plt.grid(True, alpha=0.3)
-plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
-plt.tight_layout()
-plt.show()
+if is_hickling_source_case:
+    source_time_centered = t - (T_pulse / 2)
+    source_tau_centered = source_time_centered * c1 / a
+    source_tau_complete = t * c1 / a
+    half_duration_tau = (T_pulse * c1 / a) / 2
+    half_duration_ms = (T_pulse * 1e3) / 2
+
+    hickling_tau_xlim = (
+        -max(1.0, 1.15 * half_duration_tau),
+        max(1.0, 1.15 * half_duration_tau),
+    )
+    hickling_ms_xlim = (
+        -1.15 * half_duration_ms,
+        1.15 * half_duration_ms,
+    )
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 8))
+    ax1, ax2, ax3, ax4 = axes.ravel()
+
+    ax1.plot(source_tau_centered, incident_signal, "k-", linewidth=1.5)
+    ax1.set_xlabel(r"$\tau - R$")
+    ax1.set_ylabel("Amplitude")
+    ax1.set_title("Incident signal, Hickling-normalized view")
+    ax1.grid(True, alpha=0.3)
+    ax1.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
+    ax1.set_xlim(*hickling_tau_xlim)
+
+    ax2.plot(source_time_centered * 1e3, incident_signal, "k-", linewidth=1.5)
+    ax2.set_xlabel("Time relative to pulse center [ms]")
+    ax2.set_ylabel("Amplitude")
+    ax2.set_title("Incident signal, centered physical view")
+    ax2.grid(True, alpha=0.3)
+    ax2.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
+    ax2.set_xlim(*hickling_ms_xlim)
+
+    ax3.plot(source_tau_complete, incident_signal, "k-", linewidth=1.5)
+    ax3.set_xlabel(r"$\tau = ct/a$")
+    ax3.set_ylabel("Amplitude")
+    ax3.set_title("Incident signal, full pulse duration")
+    ax3.grid(True, alpha=0.3)
+    ax3.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
+    ax3.set_xlim(0, T_pulse * c1 / a)
+
+    ax4.plot(t * 1e3, incident_signal, "k-", linewidth=1.5)
+    ax4.set_xlabel("Time [ms]")
+    ax4.set_ylabel("Amplitude")
+    ax4.set_title("Incident signal, full pulse duration")
+    ax4.grid(True, alpha=0.3)
+    ax4.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
+    ax4.set_xlim(0, T_pulse * 1e3)
+
+    fig.suptitle(
+        f"Incident Signal: {n_cycles}-cycle sinusoid, k0a={k0a:.1f}",
+        fontsize=14,
+    )
+    plt.tight_layout()
+    plt.show()
+else:
+    plt.figure(figsize=(10, 4))
+    plt.plot(t * 1e3, incident_signal, "k-", linewidth=1.5)
+    plt.xlabel("Time [ms]")
+    plt.ylabel("Amplitude")
+    plt.title(f"Incident Signal: {n_cycles}-cycle sinusoid at {f0:.1f} Hz")
+    plt.grid(True, alpha=0.3)
+    plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
+    plt.tight_layout()
+    plt.show()
 
 
 # ============================================================================
@@ -334,7 +461,7 @@ ax1.set_xlabel("ka")
 ax1.set_ylabel("|g(ka)|")
 ax1.set_title(f"Spectrum g(ka) of a {n_cycles}-cycle pulse with k0a = {k0a}")
 ax1.grid(True, alpha=0.3)
-ax1.set_xlim(0, 30)
+ax1.set_xlim(0, source_plot_ka_max)
 
 ax2.plot(ka_positive, phase, "k-", linewidth=1.5)
 ax2.set_xlabel("ka")
@@ -342,7 +469,7 @@ ax2.set_ylabel("Phase of g(ka) [rad]")
 ax2.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
 ax2.set_yticklabels(["0", "pi/2", "pi", "3pi/2", "2pi"])
 ax2.grid(True, alpha=0.3)
-ax2.set_xlim(0, 30)
+ax2.set_xlim(0, source_plot_ka_max)
 ax2.set_ylim(0, 2 * np.pi)
 plt.tight_layout()
 plt.show()
@@ -423,20 +550,35 @@ f_echo_positive, x_echo = compute_echo_response(
     ka_eps=ka_eps,
 )
 
+integration_ka_bounds = source_case["integration_ka_bounds"]
+if integration_ka_bounds is None:
+    f_echo_for_synthesis = f_echo_positive
+    response_title_suffix = "full ka range"
+    response_plot_ka_max = 30
+else:
+    ka_min, ka_max = integration_ka_bounds
+    integration_mask = (x_echo >= ka_min) & (x_echo <= ka_max)
+    f_echo_for_synthesis = np.where(integration_mask, f_echo_positive, 0.0)
+    response_title_suffix = f"ka {ka_min:g}-{ka_max:g}"
+    response_plot_ka_max = ka_max + 5
+
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
-ax1.plot(x_echo, np.abs(f_echo_positive), "k-", linewidth=1.5)
+ax1.plot(x_echo, np.abs(f_echo_for_synthesis), "k-", linewidth=1.5)
 ax1.set_xlabel("ka")
 ax1.set_ylabel("|response|")
-ax1.set_title(f"Solid {material_sphere} Sphere {echo_field} Response Used for Echo")
+ax1.set_title(
+    f"Solid {material_sphere} Sphere {echo_field} Response Used for Echo "
+    f"({response_title_suffix})"
+)
 ax1.grid(True, alpha=0.3)
-ax1.set_xlim(0, 30)
+ax1.set_xlim(0, response_plot_ka_max)
 
-phase_echo = np.mod(np.angle(f_echo_positive), 2 * np.pi)
+phase_echo = np.mod(np.angle(f_echo_for_synthesis), 2 * np.pi)
 ax2.plot(x_echo, phase_echo, "k-", linewidth=1.5)
 ax2.set_xlabel("ka")
 ax2.set_ylabel("Phase [rad]")
 ax2.grid(True, alpha=0.3)
-ax2.set_xlim(0, 30)
+ax2.set_xlim(0, response_plot_ka_max)
 ax2.set_ylim(0, 2 * np.pi)
 plt.tight_layout()
 plt.show()
@@ -448,7 +590,7 @@ plt.show()
 
 material_id = "".join(ch for ch in material_sphere if ch.isalnum())
 target = f"Sol{material_id}Sphere"
-f_echo_full = get_form_function_echo(f_echo_positive)
+f_echo_full = get_form_function_echo(f_echo_for_synthesis)
 
 # Keep the same convention as GetEchoFF in AcousticScattering_Menu_FF_spheres.py:
 # non-rigid spherical targets multiply by the reversed rebuilt form-function array.
@@ -457,10 +599,25 @@ scattered_echo = np.fft.ifft(echo_spectrum, n_fft)
 scattered_echo_normalized = scattered_echo / (np.max(np.abs(scattered_echo)) + 1e-15)
 
 t_echo = np.arange(n_fft) / sample_rate
+if is_hickling_source_case:
+    tau_echo = t_echo * c1 / a
+    R = r / a
+    echo_time_axis = tau_echo - 2 * R
+    echo_time_label = r"$\tau - 2R$"
+    echo_time_xlim = (-8, 16)
+else:
+    echo_time_axis = t_echo * 1e3
+    echo_time_label = "Time [ms]"
+    echo_time_xlim = (0, max(3.0, 1.5 * T_pulse * 1e3))
 
 print("\nScattered pulse computed:")
 print(f"  target: {target}")
 print(f"  echo field: {echo_field}")
+print(f"  source case: {selected_source_case}")
+print(f"  response range: {response_title_suffix}")
+if is_hickling_source_case:
+    print(f"  normalized range reference R = r/a: {R:.3f}")
+    print("  echo time axis: tau - 2R")
 print(f"  samples: {len(scattered_echo_normalized)}")
 print(f"  finite ratio: {np.isfinite(scattered_echo_normalized).mean():.3f}")
 print(f"  max abs before normalization: {np.max(np.abs(scattered_echo)):.3e}")
@@ -471,13 +628,13 @@ print(f"  max abs before normalization: {np.max(np.abs(scattered_echo)):.3e}")
 # ============================================================================
 
 plt.figure(figsize=(12, 6))
-plt.plot(t_echo * 1e3, np.real(scattered_echo_normalized), "k-", linewidth=1.5)
-plt.xlabel("Time [ms]")
+plt.plot(echo_time_axis, np.real(scattered_echo_normalized), "k-", linewidth=1.5)
+plt.xlabel(echo_time_label)
 plt.ylabel("Amplitude (norm.)")
-plt.title(f"Solid {material_sphere} Sphere Echo - {echo_field}")
+plt.title(f"Solid {material_sphere} Sphere Echo - {echo_field}, {selected_source_case}")
 plt.grid(True, linestyle="--", alpha=0.7)
 plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
-plt.xlim(0, 3.0)
+plt.xlim(*echo_time_xlim)
 plt.ylim(-1.1, 1.1)
 
 plt.tight_layout()
