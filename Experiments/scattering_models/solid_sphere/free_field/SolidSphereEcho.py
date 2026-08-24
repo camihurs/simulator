@@ -300,7 +300,7 @@ r = 1.73  # Slant range used in the original validation script [m]
 n_terms = 80
 ka_eps = 1e-8
 echo_field = "far-field"  # Options: "far-field" or "near-field".
-selected_source_case = "hickling_fig16_min"
+selected_source_case = "hickling_fig16_max"
 if selected_source_case not in SOURCE_CASES:
     raise ValueError(
         "selected_source_case must be one of: " + ", ".join(sorted(SOURCE_CASES))
@@ -523,6 +523,27 @@ ax2.set_yticklabels(["0", "pi/2", "pi", "3pi/2", "2pi"])
 plt.tight_layout()
 plt.show()
 
+# Hickling Fig. 6 does not plot the wrapped phase directly. It uses the
+# continuous phase parameter -arg(f_inf)/(ka), which is shown separately here
+# so that both phase representations remain available for comparison.
+phase_hickling_unwrapped = np.unwrap(np.angle(f_hickling))
+phase_hickling_parameter = np.full_like(ka_validation, np.nan, dtype=float)
+phase_valid = np.abs(ka_validation) > ka_eps
+phase_hickling_parameter[phase_valid] = (
+    -phase_hickling_unwrapped[phase_valid] / ka_validation[phase_valid]
+)
+
+plt.figure(figsize=(12, 5))
+plt.plot(ka_validation, phase_hickling_parameter, "k-", linewidth=1.5)
+plt.xlabel("ka")
+plt.ylabel(r"$-\mathrm{arg}(f_\infty)/(ka)$")
+plt.title(f"Solid {material_sphere} Sphere Phase Parameter - Hickling Fig. 6")
+plt.grid(True, alpha=0.3)
+plt.xlim(0, 30)
+plt.ylim(0, 2)
+plt.tight_layout()
+plt.show()
+
 print("\nValidation form function computed:")
 print(f"  material: {material_sphere}")
 print(f"  ka range: {ka_validation.min():.2f} / {ka_validation.max():.2f}")
@@ -596,7 +617,7 @@ f_echo_full = get_form_function_echo(f_echo_for_synthesis)
 # non-rigid spherical targets multiply by the reversed rebuilt form-function array.
 echo_spectrum = incident_fft * f_echo_full[::-1]
 scattered_echo = np.fft.ifft(echo_spectrum, n_fft)
-scattered_echo_normalized = scattered_echo / (np.max(np.abs(scattered_echo)) + 1e-15)
+scattered_echo_real = np.real(scattered_echo)
 
 t_echo = np.arange(n_fft) / sample_rate
 if is_hickling_source_case:
@@ -604,11 +625,21 @@ if is_hickling_source_case:
     R = r / a
     echo_time_axis = tau_echo - 2 * R
     echo_time_label = r"$\tau - 2R$"
-    echo_time_xlim = (-8, 16)
+    echo_time_xlim = (-3, 5)
 else:
     echo_time_axis = t_echo * 1e3
     echo_time_label = "Time [ms]"
     echo_time_xlim = (0, max(3.0, 1.5 * T_pulse * 1e3))
+
+if is_hickling_source_case:
+    normalization_mask = (echo_time_axis >= echo_time_xlim[0]) & (
+        echo_time_axis <= echo_time_xlim[1]
+    )
+else:
+    normalization_mask = np.ones_like(echo_time_axis, dtype=bool)
+
+normalization_reference = np.max(np.abs(scattered_echo_real[normalization_mask]))
+scattered_echo_normalized = scattered_echo_real / (normalization_reference + 1e-15)
 
 print("\nScattered pulse computed:")
 print(f"  target: {target}")
@@ -628,7 +659,7 @@ print(f"  max abs before normalization: {np.max(np.abs(scattered_echo)):.3e}")
 # ============================================================================
 
 plt.figure(figsize=(12, 6))
-plt.plot(echo_time_axis, np.real(scattered_echo_normalized), "k-", linewidth=1.5)
+plt.plot(echo_time_axis, scattered_echo_normalized, "k-", linewidth=1.5)
 plt.xlabel(echo_time_label)
 plt.ylabel("Amplitude (norm.)")
 plt.title(f"Solid {material_sphere} Sphere Echo - {echo_field}, {selected_source_case}")
@@ -639,3 +670,308 @@ plt.ylim(-1.1, 1.1)
 
 plt.tight_layout()
 plt.show()
+
+
+# ============================================================================
+# STEP 8: Direct Hickling Eq. (14) Echo Synthesis
+# ============================================================================
+
+# This is an independent diagnostic for the Hickling far-field cases. It uses
+# the analytical source spectrum from Eq. (16) and integrates Eq. (14) directly,
+# without FFT/IFFT, bilateral-spectrum reconstruction, or array reversal.
+if is_hickling_source_case and echo_field == "far-field":
+    ka_min, ka_max = integration_ka_bounds
+    direct_integration_mask = (x_echo >= ka_min) & (x_echo <= ka_max)
+    x_direct = x_echo[direct_integration_mask]
+    f_direct = f_echo_positive[direct_integration_mask]
+
+    # Hickling's pulse occupies -Delta_t < t < Delta_t. For a total of
+    # n_cycles, its dimensionless half-duration is Delta_tau = N*pi/x0.
+    delta_tau = n_cycles * np.pi / k0a
+    source_offset = x_direct - k0a
+    g_direct = (
+        (2.0 / np.pi)
+        * delta_tau
+        * np.sinc(source_offset * delta_tau / np.pi)
+    )
+
+    direct_echo_time_axis = np.linspace(*echo_time_xlim, 1601)
+    direct_echo_complex = np.empty_like(direct_echo_time_axis, dtype=complex)
+    spectral_product = g_direct * f_direct
+
+    # Evaluate exp[-i*x*(tau - 2R)] in small blocks to avoid allocating one
+    # large time-by-frequency matrix.
+    integration_block_size = 256
+    for block_start in range(0, direct_echo_time_axis.size, integration_block_size):
+        block_stop = min(
+            block_start + integration_block_size, direct_echo_time_axis.size
+        )
+        phase_kernel = np.exp(
+            -1j
+            * np.outer(
+                direct_echo_time_axis[block_start:block_stop],
+                x_direct,
+            )
+        )
+        direct_echo_complex[block_start:block_stop] = np.trapezoid(
+            phase_kernel * spectral_product,
+            x=x_direct,
+            axis=1,
+        )
+
+    direct_echo_real = np.real(direct_echo_complex)
+    direct_normalization = np.max(np.abs(direct_echo_real))
+    direct_echo_normalized = direct_echo_real / (direct_normalization + 1e-15)
+
+    print("\nDirect Hickling Eq. (14) echo computed:")
+    print("  source spectrum: Hickling Eq. (16), 2/pi prefactor")
+    print(f"  Delta_tau: {delta_tau:.6f}")
+    print(f"  integration range: ka {ka_min:g}-{ka_max:g}")
+    print("  Fourier kernel: exp[-i*x*(tau - 2R)]")
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(
+        direct_echo_time_axis,
+        direct_echo_normalized,
+        "k-",
+        linewidth=1.5,
+    )
+    plt.xlabel(r"$\tau - 2R$")
+    plt.ylabel("Amplitude (norm.)")
+    plt.title(
+        "Solid "
+        f"{material_sphere} Sphere Echo - Hickling Eq. (14), "
+        f"{selected_source_case}"
+    )
+    plt.grid(True, linestyle="--", alpha=0.7)
+    plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
+    plt.xlim(*echo_time_xlim)
+    plt.ylim(-1.1, 1.1)
+    plt.tight_layout()
+    plt.show()
+
+
+# ============================================================================
+# STEP 9: OpenSTB-Style Complex FFT/IFFT Echo Synthesis
+# ============================================================================
+
+# This second diagnostic follows the OpenSTB signal-processing path while keeping
+# the same Hickling case and ka integration bounds used by the direct synthesis.
+# The form function is evaluated at the physical FFT frequencies and multiplied
+# directly, without bilateral reconstruction or array reversal.
+if is_hickling_source_case and echo_field == "far-field":
+    openstb_baseband_frequency = 0.0
+    openstb_initial_phase = 0.0
+    openstb_source = np.where(
+        t < T_pulse,
+        np.exp(
+            1j
+            * (
+                2
+                * np.pi
+                * (f0 - openstb_baseband_frequency)
+                * t
+                + openstb_initial_phase
+                - np.pi / 2
+            )
+        ),
+        0.0j,
+    )
+
+    # Figure 1: analytic complex source used by OpenSTB's SinusoidBurst.
+    source_tau_centered = t * c1 / a - delta_tau
+    plt.figure(figsize=(12, 5))
+    plt.plot(
+        source_tau_centered,
+        np.real(openstb_source),
+        "k-",
+        linewidth=1.5,
+        label="Real part",
+    )
+    plt.plot(
+        source_tau_centered,
+        np.imag(openstb_source),
+        color="0.55",
+        linestyle="--",
+        linewidth=1.2,
+        label="Imaginary part",
+    )
+    plt.xlabel(r"Source time, $\tau$ (centered)")
+    plt.ylabel("Amplitude")
+    plt.title(
+        "OpenSTB-Style Analytic Source - "
+        f"{selected_source_case}, {n_cycles:g} cycles"
+    )
+    plt.grid(True, linestyle="--", alpha=0.7)
+    plt.axhline(y=0.0, color="k", linewidth=0.5)
+    plt.xlim(-delta_tau - 0.5, delta_tau + 0.5)
+    plt.ylim(-1.1, 1.1)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    openstb_frequency_offset = np.fft.fftshift(np.fft.fftfreq(n_fft, dt))
+    openstb_physical_frequency = (
+        openstb_frequency_offset + openstb_baseband_frequency
+    )
+    openstb_source_spectrum = np.fft.fftshift(
+        np.fft.fft(openstb_source, n_fft)
+    )
+    openstb_ka = 2 * np.pi * openstb_physical_frequency * a / c1
+
+    # Figure 2: the causal FFT source and Hickling's centered analytical source
+    # have the same normalized magnitude; their phases include different time origins.
+    positive_source_mask = (openstb_ka >= 0.0) & (
+        openstb_ka <= source_plot_ka_max
+    )
+    openstb_source_magnitude = np.abs(
+        openstb_source_spectrum[positive_source_mask]
+    )
+    openstb_source_magnitude /= np.max(openstb_source_magnitude) + 1e-15
+    hickling_source_magnitude = np.abs(g_direct)
+    hickling_source_magnitude /= np.max(hickling_source_magnitude) + 1e-15
+
+    plt.figure(figsize=(12, 5))
+    plt.plot(
+        openstb_ka[positive_source_mask],
+        openstb_source_magnitude,
+        "k-",
+        linewidth=1.5,
+        label="OpenSTB complex source: FFT magnitude",
+    )
+    plt.plot(
+        x_direct,
+        hickling_source_magnitude,
+        color="0.55",
+        linestyle="--",
+        linewidth=1.5,
+        label="Hickling Eq. (16): analytical magnitude",
+    )
+    plt.xlabel("ka")
+    plt.ylabel("Normalized magnitude")
+    plt.title(f"Complex Source Spectrum Comparison - {selected_source_case}")
+    plt.grid(True, linestyle="--", alpha=0.7)
+    plt.xlim(ka_min, ka_max)
+    plt.ylim(-0.05, 1.05)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    openstb_response = np.zeros(n_fft, dtype=complex)
+    openstb_response_mask = (
+        (openstb_physical_frequency > 0.0)
+        & (openstb_ka >= ka_min)
+        & (openstb_ka <= ka_max)
+    )
+    openstb_response_active, _ = compute_echo_response(
+        freqs=openstb_physical_frequency[openstb_response_mask],
+        c1=c1,
+        a=a,
+        cd2=cd2,
+        cs2=cs2,
+        rho1=rho1,
+        rho2=rho2,
+        r=r,
+        n_terms=n_terms,
+        field=echo_field,
+        ka_eps=ka_eps,
+    )
+    openstb_response[openstb_response_mask] = openstb_response_active
+
+    travel_time = 2 * r / c1
+    travel_phase = np.exp(
+        -2j * np.pi * openstb_physical_frequency * travel_time
+    )
+    openstb_echo_spectrum = (
+        openstb_source_spectrum * openstb_response * travel_phase
+    )
+    openstb_echo = np.fft.ifft(np.fft.ifftshift(openstb_echo_spectrum))
+
+    openstb_echo_time = np.arange(n_fft) / sample_rate
+    openstb_echo_time_axis = (
+        openstb_echo_time * c1 / a - 2 * R - delta_tau
+    )
+    openstb_echo_real = np.real(openstb_echo)
+    openstb_normalization_mask = (
+        (openstb_echo_time_axis >= echo_time_xlim[0])
+        & (openstb_echo_time_axis <= echo_time_xlim[1])
+    )
+    openstb_normalization = np.max(
+        np.abs(openstb_echo_real[openstb_normalization_mask])
+    )
+    openstb_echo_normalized = openstb_echo_real / (
+        openstb_normalization + 1e-15
+    )
+
+    # Hickling and OpenSTB use opposite complex-exponential conventions. Test
+    # that conversion by changing only the form-function phase convention.
+    openstb_conjugated_echo_spectrum = (
+        openstb_source_spectrum * np.conjugate(openstb_response) * travel_phase
+    )
+    openstb_conjugated_echo = np.fft.ifft(
+        np.fft.ifftshift(openstb_conjugated_echo_spectrum)
+    )
+    openstb_conjugated_echo_real = np.real(openstb_conjugated_echo)
+    openstb_conjugated_normalization = np.max(
+        np.abs(openstb_conjugated_echo_real[openstb_normalization_mask])
+    )
+    openstb_conjugated_echo_normalized = openstb_conjugated_echo_real / (
+        openstb_conjugated_normalization + 1e-15
+    )
+
+    print("\nOpenSTB-style complex FFT/IFFT echo computed:")
+    print("  source: analytic SinusoidBurst convention")
+    print(f"  baseband frequency: {openstb_baseband_frequency:.1f} Hz")
+    print(f"  initial phase: {openstb_initial_phase:.3f} rad")
+    print(f"  response range: ka {ka_min:g}-{ka_max:g}")
+    print("  form-function multiplication: direct (no reversal)")
+    print("  comparison variant: conjugated form function (no reversal)")
+    print(f"  travel time: {travel_time:.6e} s")
+
+    # Figure 3: compare the validated direct integral with the OpenSTB-style
+    # direct and conjugated form-function variants on identical normalized axes.
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 12), sharex=True)
+    ax1.plot(
+        direct_echo_time_axis,
+        direct_echo_normalized,
+        "k-",
+        linewidth=1.5,
+    )
+    ax1.set_ylabel("Amplitude (norm.)")
+    ax1.set_title("Reference: Direct Hickling Eq. (14)")
+    ax1.grid(True, linestyle="--", alpha=0.7)
+    ax1.axhline(y=0.0, color="k", linewidth=0.5)
+    ax1.set_ylim(-1.1, 1.1)
+
+    ax2.plot(
+        openstb_echo_time_axis,
+        openstb_echo_normalized,
+        "k-",
+        linewidth=1.5,
+    )
+    ax2.set_ylabel("Amplitude (norm.)")
+    ax2.set_title("OpenSTB-Style Complex FFT/IFFT: Direct Form Function")
+    ax2.grid(True, linestyle="--", alpha=0.7)
+    ax2.axhline(y=0.0, color="k", linewidth=0.5)
+    ax2.set_ylim(-1.1, 1.1)
+
+    ax3.plot(
+        openstb_echo_time_axis,
+        openstb_conjugated_echo_normalized,
+        "k-",
+        linewidth=1.5,
+    )
+    ax3.set_xlabel(r"$\tau - 2R$")
+    ax3.set_ylabel("Amplitude (norm.)")
+    ax3.set_title("OpenSTB-Style Complex FFT/IFFT: Conjugated Form Function")
+    ax3.grid(True, linestyle="--", alpha=0.7)
+    ax3.axhline(y=0.0, color="k", linewidth=0.5)
+    ax3.set_xlim(*echo_time_xlim)
+    ax3.set_ylim(-1.1, 1.1)
+
+    fig.suptitle(
+        f"Solid {material_sphere} Sphere Echo Comparison - "
+        f"{selected_source_case}"
+    )
+    plt.tight_layout()
+    plt.show()
