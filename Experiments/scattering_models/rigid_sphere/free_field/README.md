@@ -1,198 +1,318 @@
-# Rigid Sphere Scattering in Free Field
+# Rigid-Sphere Scattering in Free Field
 
-## 1. Parameter Selection
+This directory contains standalone implementations of the far-field acoustic response
+of an ideally rigid sphere immersed in a fluid. The scripts calculate the complex form
+function and synthesize the echo produced by an incident pulse without the additional
+propagation and platform effects present in OpenSTB.
 
-This implementation reproduces Figure 6 from Rudgers (1968): "Acoustic Pulses Scattered by a Rigid Sphere Immersed in a Fluid".
+The reference model is A. J. Rudgers' classical solution for acoustic pulses scattered
+by a rigid sphere. The implementation is restricted to free-field scattering.
 
-### 1.1. Paper Parameters (Normalized)
+## 1. Available standalones
 
-The paper uses normalized variables:
-- **k₀a = 15.0** (size parameter for the amplitude of the incident signal)
-- **b = 2** (number of cycles of the incident sine signal)
-- **Geometry**: Monostatic backscattering in the far field (θ = π)
+| File | Purpose |
+| --- | --- |
+| `RigidSphereEcho.py` | Historical exploratory script used for the original reproduction of Rudgers and the validation reported in the elastic-scattering plugins paper. |
+| `RigidSphereEchoAnalytic.py` | Clean general-purpose standalone using the same analytic-signal and FFT/IFFT convention as OpenSTB. This is the recommended script for new experiments. |
 
-### 1.2. Physical Parameters
+The historical script is preserved because it records the original scientific
+validation path. The analytic script was not created to correct the rigid-sphere modal
+physics: both scripts and the OpenSTB plugin calculate the same complex form function.
+It was created to provide a clearer and reusable source-to-echo pipeline for arbitrary
+incident signals and to serve as an architectural reference for other target models.
 
-To convert from normalized to physical parameters:
+## 2. Physical model
 
-**Given:**
-- Sphere radius: **a = 0.25 m**
-- Sound speed: **c = 1480 m/s**
-- Size parameter from paper: **k₀a = 15.0**
+### 2.1 Assumptions
 
-**Calculate center frequency:**
+The current standalone model assumes:
 
-$$k_0 = \frac{2\pi f_0}{c}$$
+- an ideally rigid sphere;
+- a homogeneous fluid with sound speed `c`;
+- free-field conditions;
+- far-field observation;
+- a selectable scattering angle, with `theta = pi` representing monostatic
+  backscattering;
+- no propagation loss, absorption, Doppler, transducer beampattern, noise, or platform
+  motion.
 
-$$k_0 a = \frac{2\pi f_0}{c} \times a = 15.0$$
-
-$$f_0 = \frac{15.0 \times c}{2\pi \times a} = \frac{15.0 \times 1480}{2\pi \times 0.25} \approx 14{,}133 \text{ Hz}$$
-
-**Pulse parameters:**
-- Center frequency: **f₀ ≈ 14.1 kHz**
-- Number of cycles: **2**
-- Pulse duration: **T = 2/f₀ ≈ 0.141 ms**
-- Wavelength: **λ = c/f₀ ≈ 0.105 m**
-
-### 1.3. Validation
-
-The normalized pulse length from the paper is:
-$$m = \frac{2b\pi}{k_0a} = \frac{4\pi}{15} \approx 0.838$$
-
-This represents the pulse duration in units of a/c (time for sound to travel one radius).
-
-Physical pulse length: **L = cT ≈ 0.209 m ≈ 0.838a** ✓
-
-
-## 2. Implementation Details
-
-
-### 2.1. Form function definition
-
-The form function implemented in this script corresponds **explicitly to Equation (11)** in Rudgers (1968).
-
-For monostatic backscattering in the far field (θ = π), the form function is computed as:
+The dimensionless frequency is
 
 $$
-f(ka) = -\frac{2}{ka} \sum_{n=0}^{\infty} (2n+1)\, P_n(\cos\theta)\, \sin\eta_n(ka)\, e^{i\eta_n(ka)}
+ka = \frac{2\pi f a}{c},
 $$
 
-where:
-- $P_n(\cdot)$ are Legendre polynomials,
-- $\eta_n(ka)$ are the modal phase shifts for a rigid sphere,
-- The summation is truncated to a finite number of modes in the numerical implementation.
+where $f$ is physical frequency, $a$ is sphere radius, and $c$ is sound speed.
 
-This expression is evaluated in the frequency domain to obtain the complex-valued form function \( f(ka) \), which is then used in the synthesis of the scattered pulse following Equation (8) of the paper.
+### 2.2 Form function
 
+The far-field form function corresponds to Eq. (11) of Rudgers:
 
-### 2.2. Pulse Synthesis Method: FFT vs. Trapezoidal Integration
+$$
+f(ka) = -\frac{2}{ka}
+\sum_{n=0}^{\infty}
+(2n+1)P_n(\cos\theta)\sin\eta_n(ka)e^{i\eta_n(ka)},
+$$
 
-The scattered pulse is synthesized using Equation (8) from the paper:
+where $P_n$ is the Legendre polynomial of order $n$ and the rigid-sphere modal phase
+shift is evaluated numerically from
 
-$$\Psi(\tau) = \frac{1}{2\pi} \text{Re} \int_0^{\infty} g(ka) f(ka) e^{ika\tau} d(ka)$$
+$$
+\eta_n = \operatorname{atan2}\left(j_n'(ka),-y_n'(ka)\right).
+$$
 
-**Paper's approach (1968):**
-- Direct numerical integration using the **trapezoidal rule**
-- Computed for discrete values of τ
-- FFT algorithms were not yet widely available
+The numerical implementation truncates the series after a configurable number of
+modes (`N_TERMS = 80` by default). The `atan2` expression avoids unstable direct
+division when the denominator approaches zero.
 
-**Our implementation:**
-- Uses **Inverse Fast Fourier Transform (IFFT)**
-- Mathematically equivalent to Eq. 8
-- Computationally more efficient
+### 2.3 Behaviour at `ka = 0`
 
-**Why FFT is equivalent:**
+The analytical expression contains the factor $2/(ka)$, but the rigid-sphere form
+function tends to zero in the Rayleigh limit. The standalone therefore evaluates the
+modal expression using a small positive threshold and explicitly assigns
 
-The IFFT computes:
-$$\text{IFFT}\{G[k]\} = \frac{1}{N}\sum_{k=0}^{N-1} G[k] e^{i 2\pi kn/N}$$
+$$
+f(0)=0.
+$$
 
-When we multiply the spectra `g(ka) × f(ka)` in the frequency domain and apply IFFT, we're computing the same integral as Eq. 8, but using the **convolution theorem** and efficient FFT algorithms instead of direct numerical integration.
+The phase at exactly `ka = 0` is undefined because the magnitude is zero. NumPy reports
+the argument of complex zero as zero; this convention has no physical effect on the
+echo.
 
-**Result:** Both methods produce identical scattered pulseforms (within numerical precision), but FFT is significantly faster for large datasets.
+## 3. Historical Rudgers standalone
 
+`RigidSphereEcho.py` reproduces the reference case used during the original model
+development:
 
-### 2.3. Spectral Analysis
+- $k_0a=15$;
+- a two-cycle real truncated sine;
+- monostatic far-field backscattering;
+- sphere radius $a=0.25$ m;
+- sound speed $c=1480$ m/s.
 
-#### 2.3.1. Factor of 2 in FFT
-The incident pulse spectrum is computed using:
-```python
-incident_fft = np.fft.fft(incident_signal, n_fft) * dt
-incident_fft *= 2  # Factor of 2 for positive frequencies only
+The corresponding centre frequency is
+
+$$
+f_0 = \frac{(k_0a)c}{2\pi a} \approx 14.13\ \text{kHz},
+$$
+
+and the pulse duration is approximately 0.142 ms.
+
+This script follows the original validation workflow: it constructs a real causal
+sine, retains the positive-frequency part of its FFT, applies the historical factor of
+two, multiplies by the form function, and uses an IFFT-based synthesis. It also contains
+diagnostics accumulated during comparison with the OpenSTB plugin dump.
+
+That procedure remains useful for reproducing the historical figures, but it should
+not be interpreted as the canonical pipeline for arbitrary analytic sources. In
+particular, a one-sided real-source synthesis and a full-grid analytic-signal synthesis
+need not produce point-for-point identical secondary features.
+
+## 4. Analytic standalone
+
+`RigidSphereEchoAnalytic.py` uses one canonical pipeline for both reference and general
+sources:
+
+```text
+analytic complex source
+-> bilateral fftshift(fft(...))
+-> physical frequency grid
+-> complex rigid-sphere form function
+-> direct multiplication S(f) * f(ka)
+-> ifft(ifftshift(...))
+-> complex baseband echo
+-> optional real passband view
 ```
 
-**Why the factor of 2?**
+This is the same Fourier organization used by OpenSTB. The standalone does not reverse
+frequency arrays, reconstruct a Hermitian spectrum manually, or introduce a separate
+echo-synthesis convention for the reference case.
 
-In the paper, the spectrum is defined as a Fourier integral over all time (Eq. 4):
-$$g(ka) = \frac{2}{p_0} \int_{-\infty}^{\infty} p_i(\tau') e^{-ika\tau'} d\tau'$$
+### 4.1 Source cases
 
-However, when synthesizing the scattered pulse (Eq. 8), the integration is only over **positive ka values** (positive frequencies):
-$$\Psi(\tau) = \frac{1}{2\pi} \text{Re} \int_0^{\infty} g(ka) f(ka) e^{ika\tau} d(ka)$$
+Select the source near the beginning of the file:
 
-When we take only the positive frequencies from a two-sided FFT, we must multiply by 2 to conserve energy. This is because the negative frequencies (which are complex conjugates for real signals) contain the same energy as the positive frequencies.
-
-**Physical interpretation**: The real signal contains energy at both +f and -f frequencies. By keeping only positive frequencies and doubling, we account for the total energy.
-
-#### 2.3.2. Form Function at ka = 0
-
-The form function is computed for ka > 0, and we prepend a zero value:
 ```python
-f_ka = compute_form_function(ka_positive[1:], theta=np.pi)
-f_ka = np.concatenate([[0], f_ka])
+SOURCE_CASE = "rudgers_fig6"
 ```
 
-**Why exclude ka = 0 from the computation?**
+Available cases are:
 
-From Eq. 9 in the paper, the form function includes the term:
-$$f(ka) = -\frac{2}{ka} \sum_{n=0}^{\infty} (\ldots)$$
+#### `rudgers_fig6`
 
-This creates a **division by zero** at ka = 0.
+A fixed, reproducible preset with $k_0a=15$ and two cycles. The analytic source is the
+complex equivalent of Rudgers' physical sine:
 
-**Why set f(0) = 0?**
+$$
+s_a(t)=e^{i(2\pi f_0t-\pi/2)},
+$$
 
-Physically, when ka → 0 (sphere radius ≪ wavelength), the scattering cross-section vanishes. The Rayleigh scattering limit shows that scattering efficiency scales as (ka)⁴ for very small spheres, confirming that f(ka) → 0 as ka → 0.
+whose real part is $\sin(2\pi f_0t)$ inside the pulse duration.
 
-Mathematically, examining Eq. 9 term by term, each term in the sum behaves as:
-$$(2n+1) P_n(\cos\theta) \sin\eta_n e^{i\eta_n}$$
+#### `tone_burst`
 
-As ka → 0, the phase shifts $η_n$ → 0, making $sin(η_n) → 0$, and thus the entire sum vanishes.
+A configurable analytic fixed-frequency burst. Set:
 
-**Why do the phase shifts $η_n → 0$?**
-
-From Eq. 10, the phase shifts are defined as:
-$$\tan(\eta_n) = -\frac{(n+1)j_n(ka) - (ka)j_{n-1}(ka)}{(n+1)y_n(ka) - (ka)y_{n-1}(ka)}$$
-
-Using the recurrence relation for spherical Bessel functions:
-$$j_n'(x) = j_{n-1}(x) - \frac{n+1}{x}j_n(x)$$
-
-We can show that:
-$$(n+1)j_n(ka) - (ka)j_{n-1}(ka) = -(ka)j_n'(ka)$$
-
-And similarly for $y_n$. This is why the code uses derivatives directly.
-
-**Asymptotic behavior as ka → 0:**
-
-The spherical Bessel functions behave as:
-- **$j_n$ (regular at origin)**: j₀(ka) → 1, j₁(ka) → $\frac{ka}{3}$, $j_n$(ka) ~ (ka)ⁿ
-- **$y_n$ (singular at origin)**: y₀(ka) → $\frac{-1}{ka}$, y₁(ka) → $\frac{-1}{ka²}$, $y_n$(ka) ~ $\frac{-1}{(ka)^{n+1}}$
-
-For the derivatives:
-- $j_n$'(ka) → 0 (or small values proportional to ka)
-- $y_n$'(ka) → -∞ (diverges)
-
-Therefore:
-$$\tan(\eta_n) = \frac{j_n'(ka)}{-y_n'(ka)} \approx \frac{\text{small}}{-\infty} \rightarrow 0$$
-
-Since tan($η_n$) → 0, then **$η_n$ → 0**, making $sin(η_n)$ → 0, and thus f(ka) → 0 as ka → 0.
-
-
-### 2.4. Form Function Phase at ka = 0
-
-The phase plot of the form function f(ka) shows a minor discrepancy at ka = 0 compared to Figure 2 in the paper:
-- **Our implementation**: Phase starts at 0 radians
-- **Paper Figure 2**: Phase starts at π radians
-
-**Why this difference occurs:**
-
-In our implementation, we set f(0) = 0 (complex zero) to avoid division by zero in Eq. 9. When computing the phase:
 ```python
-phase_f = np.angle(f_ka)  # For f_ka[0] = 0+0j
+TONE_FREQUENCY_HZ = 14_000.0
+TONE_CYCLES = 4.0
 ```
 
-NumPy's `np.angle(0+0j)` returns 0 by convention.
+This case is intended for general experiments and is not automatically a Rudgers
+reference case.
 
-**Why this difference doesn't matter:**
+#### `lfm_chirp`
 
-1. **Magnitude is zero**: Since |f(0)| = 0, the value at ka = 0 makes **no contribution** to the scattered field, regardless of its phase.
+A configurable analytic linear-frequency-modulated chirp. The defaults match the
+OpenSTB experiment source:
 
-2. **Phase is undefined**: Mathematically, the phase (argument) of a complex number with zero magnitude is undefined. Any phase value would be equally valid.
+```python
+CHIRP_START_HZ = 500.0
+CHIRP_STOP_HZ = 10_000.0
+CHIRP_DURATION_S = 0.020
+CHIRP_SAMPLE_RATE_HZ = 30_000.0
+CHIRP_USE_HANN_WINDOW = True
+```
 
-3. **Physical interpretation**: At ka = 0 (wavelength >> sphere radius), the scattering cross-section vanishes. The sphere is acoustically invisible, so the phase of the (non-existent) scattered wave is meaningless.
+The chirp is represented in complex baseband around 5.25 kHz. Its instantaneous
+baseband frequency varies from -4.75 to +4.75 kHz and crosses zero at the pulse
+midpoint. This can make the real part of the baseband signal appear to decrease to zero
+frequency and increase again. The physical passband frequency does not reverse: it
+increases monotonically from 0.5 to 10 kHz.
 
-4. **For ka > 0**: Our phase values match the paper's Figure 2 perfectly, showing the characteristic sawtooth pattern with jumps at specific ka values.
+For this reason, the source figure for `lfm_chirp` contains three panels:
 
-**Conclusion**: The difference at ka = 0 is purely cosmetic and has no effect on the computed scattered pulse.
+1. the real part of the complex baseband signal and its envelope;
+2. the reconstructed physical passband chirp and its envelope;
+3. the spectrum plotted against physical frequency.
 
+### 4.2 Normal figures
+
+With all optional comparisons disabled, the analytic standalone produces three
+figures:
+
+1. incident source in time and frequency;
+2. form-function magnitude and wrapped phase;
+3. target-only echo and scattered spectrum.
+
+The echo time is relative to the FFT origin because the standalone does not add a
+propagation range or travel-time delay.
+
+### 4.3 Optional validation figures
+
+The validation controls are:
+
+```python
+SHOW_VALIDATION_PLOTS = True
+COMPARE_DIRECT_RUDGERS = True
+COMPARE_OPENSTB_DUMP = True
+```
+
+For `rudgers_fig6`, the first option adds a comparison between:
+
+- the spectrum obtained from the analytic-source FFT;
+- the spectrum obtained from Rudgers' defining integral for the real truncated sine.
+
+`COMPARE_DIRECT_RUDGERS` additionally compares the canonical FFT/IFFT echo with a
+direct numerical evaluation of Rudgers Eq. (8). These Rudgers-specific figures are not
+shown for `tone_burst` or `lfm_chirp`, because different source parameters would not be
+a valid comparison with the published reference case.
+
+`COMPARE_OPENSTB_DUMP` compares the standalone form function with the values generated
+by the OpenSTB `RigidSphereFormFunction` plugin. This comparison is independent of the
+selected source because it evaluates only the target response on the dump's `ka` grid
+and at its stored scattering angle.
+
+## 5. Validation results and interpretation
+
+### 5.1 Form function
+
+The standalone form function reproduces the magnitude and phase of Rudgers' Fig. 2.
+When evaluated on the controlled OpenSTB dump grid, the analytic standalone and the
+OpenSTB plugin agree numerically in both magnitude and wrapped phase. The comparison
+excludes only the DC convention: the standalone assigns the physical limit `f(0)=0`,
+whereas the plugin evaluates the expression at `ka_eps`.
+
+### 5.2 Rudgers echo
+
+The principal echo packet from the analytic FFT/IFFT synthesis agrees closely with the
+direct evaluation of Rudgers Eq. (8), including its temporal orientation and dominant
+amplitudes. This reproduces the essential features of Rudgers' Fig. 6.
+
+The analytic echo contains secondary peaks that are absent from Rudgers' real-source
+echo. The same peaks appear in the OpenSTB result reported in the elastic-scattering
+plugins paper and disappear when the historical real incident signal is used. Since
+the form function is identical between the standalone and OpenSTB, the working
+interpretation is that these features arise from the finite-duration analytic complex
+source and its full FFT-grid spectral construction, not from an error in the rigid-
+sphere modal response.
+
+The analytic/OpenSTB-compatible echo is therefore not expected to be point-for-point
+identical to Rudgers' real-source, positive-frequency synthesis, even though the form
+function and the principal physical echo components agree.
+
+## 6. Controlled comparison with OpenSTB
+
+The optional comparison reads:
+
+```text
+Experiments/simple_points_study/rigid_sphere_ff_debug.npz
+```
+
+This file is generated by running `Experiments/simple_points_study/simulate.py`. It is
+a valid controlled rigid-sphere reference dump only when the experiment is configured
+as follows:
+
+1. Select the `sine` source in `shared_params.py`.
+2. Keep only `RigidSphereFormFunction` enabled.
+3. Disable the other propagation/distortion plugins.
+4. Use stop-and-hop travel time.
+5. Use the identity quaternion for transducer orientation.
+6. Disable/comment both transmit and receive beampatterns.
+
+The dump must contain compatible one-dimensional arrays for `f_hz`, `ka`,
+`ff_complex`, and `S_in_complex`. A dump produced under another experiment
+configuration should not be interpreted as the controlled Rudgers comparison.
+
+The standalone reads the scattering angle saved in the dump. It can differ slightly
+from exactly $\pi$ because it comes from the numerical experiment geometry. Recomputing
+the standalone form function at that stored angle permits a direct point-by-point
+comparison with the plugin.
+
+## 7. Running the scripts
+
+From the repository root, run either script with the project virtual environment:
+
+```powershell
+.venv\Scripts\python.exe Experiments\scattering_models\rigid_sphere\free_field\RigidSphereEchoAnalytic.py
+```
+
+or, for the historical validation:
+
+```powershell
+.venv\Scripts\python.exe Experiments\scattering_models\rigid_sphere\free_field\RigidSphereEcho.py
+```
+
+The scripts are also designed to be run with the VS Code play button, which is the
+normal interactive plotting workflow for this project.
+
+## 8. Scope and limitations
+
+- Only the free-field far-field rigid-sphere response is validated here.
+- The standalone computes the target response only; it is not a replacement for the
+  complete OpenSTB pipeline.
+- Absolute received levels and arrival times require propagation geometry and the
+  relevant OpenSTB distortions.
+- The default modal truncation and FFT settings are suitable for the documented cases,
+  but substantially larger `ka` ranges may require a convergence review.
+- The optional OpenSTB comparison is meaningful only when the dump was generated with
+  the controlled configuration listed above.
 
 ## References
 
-Rudgers, A. J. (1968). "Acoustic Pulses Scattered by a Rigid Sphere Immersed in a Fluid." *The Journal of the Acoustical Society of America*, 45(4), 900-910.
+1. Rudgers, A. J. (1969). "Acoustic Pulses Scattered by a Rigid Sphere Immersed in a
+   Fluid." *The Journal of the Acoustical Society of America*, 45(4), 900-910.
+   <https://doi.org/10.1121/1.1911567>
+2. Hurtado Erasso, C. A., Bonnett, B., Lopera Tellez, O., Lambot, S., and Neyt, X.
+   (2026). "Elastic Scattering Plugins for the OpenSTB Sonar Simulator." *Proceedings
+   of the Institute of Acoustics*, 48(1).

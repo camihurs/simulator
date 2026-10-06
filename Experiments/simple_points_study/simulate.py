@@ -6,12 +6,11 @@ from typing import Literal
 
 import numpy as np
 import quaternionic
+from shared_params import SIM_PARAMS
+from signal_factory import build_signal_from_params
 
 from openstb.simulator.controller import simple_points
 from openstb.simulator.plugin import loader
-from pathlib import Path
-from shared_params import SIM_PARAMS
-from signal_factory import build_signal_from_params
 
 # The local Dask cluster uses the multiprocessing module. This will import this
 # script at the start of each worker process. If the code to configure and start the
@@ -94,8 +93,8 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
         {
             "name": "constant_interval",
             "parameters": {
-                "interval": 0.1, #Original in 0.2
-                #"interval": 0.8, #For longer distances
+                "interval": 0.1,  # Original in 0.2
+                # "interval": 0.8, #For longer distances
                 "start_delay": 0,
                 "end_delay": 0.5,
             },
@@ -138,10 +137,10 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
             {
                 "name": "single_point",
                 "parameters": {
-                    #"position": (5, 500, 10), #Longer distance, to try to see the effect of the Anslie attenuation plugin.
-                    #"position": (5, 15, 10),
+                    # "position": (5, 500, 10), #Longer distance, to try to see the effect of the Anslie attenuation plugin.
+                    # "position": (5, 15, 10),
                     "position": (5, 40, 10),
-                    #"position": (5, 8, 3),
+                    # "position": (5, 8, 3),
                     "reflectivity": 1,
                 },
             }
@@ -150,67 +149,63 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
 
     # Use the stop-and-hop approximation when calculating the travel time of the pulse.
     config["travel_time"] = loader.travel_time(
+        # {
+        #     "name": "iterative",
+        #     "parameters": {
+        #         "max_iterations": 20,
+        #         "tolerance": 1e-8,
+        #     },
         {
-            "name": "iterative",
-            "parameters": {
-                "max_iterations": 20,
-                "tolerance": 1e-8,
-            },
-
-            # "name": "stop_and_hop",
-            # "parameters": {},
+            "name": "stop_and_hop",
+            "parameters": {},
         }
     )
 
     # Apply two distortions: spherical spreading (1/r scaling to the amplitude on
     # each direction) and acoustic attenuation.
     config["distortion"] = [
+        # loader.distortion(
+        #     {
+        #         "name": "geometric_spreading",
+        #         "parameters": {
+        #             "power": 1.0,
+        #         },
+        #     }
+        # ),
+        # loader.distortion(
+        #     {
+        #         "name": "anslie_mccolm_attenuation",
+        #         "parameters": {
+        #             "frequency": "centre",
+        #         },
+        #     }
+        # ),
+        # loader.distortion(
+        #     {
+        #         "name": "doppler",
+        #         "parameters": {
+        #             "calculate_c_rx": True
+        #         },
+        #     }
+        # ),
         loader.distortion(
             {
-                "name": "geometric_spreading",
+                "name": "RigidSphereFormFunction:openstb.simulator.distortion.rigid_sphere",
                 "parameters": {
-                    "power": 1.0,
+                    "radius_m": SIM_PARAMS["rigid_sphere"]["radius_m"],
+                    "n_terms": SIM_PARAMS["rigid_sphere"]["n_terms"],
+                    "scale": SIM_PARAMS["rigid_sphere"]["scale"],
+                    "ka_eps": SIM_PARAMS["rigid_sphere"]["ka_eps"],
+                    "debug_dump": SIM_PARAMS["debug"]["dump_form_function_from_plugin"],
+                    "debug_dump_path": SIM_PARAMS["debug"]["plugin_dump_path"],
                 },
             }
-        ),
-
-        loader.distortion(
-            {
-                "name": "anslie_mccolm_attenuation",
-                "parameters": {
-                    "frequency": "centre",
-                },
-            }
-        ),
-
-        loader.distortion(
-            {
-                "name": "doppler",
-                "parameters": {
-                    "calculate_c_rx": True
-                },
-            }
-        ),
-
-        loader.distortion(
-        {
-            "name": "RigidSphereFormFunction:openstb.simulator.distortion.rigid_sphere",
-            "parameters": {
-                "radius_m": SIM_PARAMS["rigid_sphere"]["radius_m"],
-                "n_terms": SIM_PARAMS["rigid_sphere"]["n_terms"],
-                "scale": SIM_PARAMS["rigid_sphere"]["scale"],
-                "ka_eps": SIM_PARAMS["rigid_sphere"]["ka_eps"],
-                "debug_dump": SIM_PARAMS["debug"]["dump_form_function_from_plugin"],
-                "debug_dump_path": SIM_PARAMS["debug"]["plugin_dump_path"],
-            },
-        }
-    )
+        )
     ]
 
-    #signal, _, sim_baseband_frequency = build_signal_from_params(SIM_PARAMS)
+    # signal, _, sim_baseband_frequency = build_signal_from_params(SIM_PARAMS)
     signal, f0, sim_baseband_frequency = build_signal_from_params(SIM_PARAMS)
     sample_rate_sim = (10.0 * f0) if f0 is not None else 30e3
-
 
     # Set the desired orientation of the transducers. Without rotation, the normal of
     # the transducer, i.e., the direction it is pointing, is [1, 0, 0] (x is forward, y
@@ -220,8 +215,8 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # starboard) and 15 degrees around x (15 degrees down).
     q_yaw = quaternionic.array.from_rotation_vector([0, 0, np.pi / 2])
     q_tilt = quaternionic.array.from_rotation_vector([np.radians(15), 0, 0])
-    q_transducer = q_tilt * q_yaw
-    #q_transducer = quaternionic.array([1.0, 0.0, 0.0, 0.0])
+    # q_transducer = q_tilt * q_yaw
+    q_transducer = quaternionic.array([1.0, 0.0, 0.0, 0.0])
 
     # Define a common far-field beampattern for the transducers. Note that this is just
     # a distortion attached to the transducers; we could add this to the list of
@@ -230,13 +225,13 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     beampattern = {
         "name": "rectangular_beampattern",
         "parameters": {
-            #"width": 0.015,
+            # "width": 0.015,
             "width": 0.6,
-            #"height": 0.03,
+            # "height": 0.03,
             "height": 0.8,
             "transmit": True,
             "receive": False,
-            #"frequency": "centre",
+            # "frequency": "centre",
             "frequency": "all",
         },
     }
@@ -248,7 +243,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
             "parameters": {
                 "position": [0, 1.2, 0.3],
                 "orientation": q_transducer,
-                "beampattern": beampattern, #Comment this line to use an omnidirectional beampattern for the transmitter.
+                # "beampattern": beampattern,  # Comment this line to use an omnidirectional beampattern for the transmitter.
             },
         }
     )
@@ -263,11 +258,11 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
                 "parameters": {
                     "position": [x, 1.2, 0],
                     "orientation": q_transducer,
-                    "beampattern": beampattern,
+                    # "beampattern": beampattern,
                 },
             }
         )
-        #for x in [-0.1, -0.05, 0, 0.05, 0.1]
+        # for x in [-0.1, -0.05, 0, 0.05, 0.1]
         for x in [0]
     ]
 
@@ -324,7 +319,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     sim = simple_points.SimplePointSimulation(
         result_filename="simple_points.zarr",
         points_per_chunk=1000,
-        #sample_rate=30e3,
+        # sample_rate=30e3,
         sample_rate=sample_rate_sim,
         baseband_frequency=sim_baseband_frequency,
     )

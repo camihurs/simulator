@@ -689,11 +689,7 @@ if is_hickling_source_case and echo_field == "far-field":
     # n_cycles, its dimensionless half-duration is Delta_tau = N*pi/x0.
     delta_tau = n_cycles * np.pi / k0a
     source_offset = x_direct - k0a
-    g_direct = (
-        (2.0 / np.pi)
-        * delta_tau
-        * np.sinc(source_offset * delta_tau / np.pi)
-    )
+    g_direct = (2.0 / np.pi) * delta_tau * np.sinc(source_offset * delta_tau / np.pi)
 
     direct_echo_time_axis = np.linspace(*echo_time_xlim, 1601)
     direct_echo_complex = np.empty_like(direct_echo_time_axis, dtype=complex)
@@ -767,10 +763,7 @@ if is_hickling_source_case and echo_field == "far-field":
         np.exp(
             1j
             * (
-                2
-                * np.pi
-                * (f0 - openstb_baseband_frequency)
-                * t
+                2 * np.pi * (f0 - openstb_baseband_frequency) * t
                 + openstb_initial_phase
                 - np.pi / 2
             )
@@ -799,8 +792,7 @@ if is_hickling_source_case and echo_field == "far-field":
     plt.xlabel(r"Source time, $\tau$ (centered)")
     plt.ylabel("Amplitude")
     plt.title(
-        "OpenSTB-Style Analytic Source - "
-        f"{selected_source_case}, {n_cycles:g} cycles"
+        f"OpenSTB-Style Analytic Source - {selected_source_case}, {n_cycles:g} cycles"
     )
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.axhline(y=0.0, color="k", linewidth=0.5)
@@ -811,22 +803,14 @@ if is_hickling_source_case and echo_field == "far-field":
     plt.show()
 
     openstb_frequency_offset = np.fft.fftshift(np.fft.fftfreq(n_fft, dt))
-    openstb_physical_frequency = (
-        openstb_frequency_offset + openstb_baseband_frequency
-    )
-    openstb_source_spectrum = np.fft.fftshift(
-        np.fft.fft(openstb_source, n_fft)
-    )
+    openstb_physical_frequency = openstb_frequency_offset + openstb_baseband_frequency
+    openstb_source_spectrum = np.fft.fftshift(np.fft.fft(openstb_source, n_fft))
     openstb_ka = 2 * np.pi * openstb_physical_frequency * a / c1
 
     # Figure 2: the causal FFT source and Hickling's centered analytical source
     # have the same normalized magnitude; their phases include different time origins.
-    positive_source_mask = (openstb_ka >= 0.0) & (
-        openstb_ka <= source_plot_ka_max
-    )
-    openstb_source_magnitude = np.abs(
-        openstb_source_spectrum[positive_source_mask]
-    )
+    positive_source_mask = (openstb_ka >= 0.0) & (openstb_ka <= source_plot_ka_max)
+    openstb_source_magnitude = np.abs(openstb_source_spectrum[positive_source_mask])
     openstb_source_magnitude /= np.max(openstb_source_magnitude) + 1e-15
     hickling_source_magnitude = np.abs(g_direct)
     hickling_source_magnitude /= np.max(hickling_source_magnitude) + 1e-15
@@ -879,29 +863,20 @@ if is_hickling_source_case and echo_field == "far-field":
     openstb_response[openstb_response_mask] = openstb_response_active
 
     travel_time = 2 * r / c1
-    travel_phase = np.exp(
-        -2j * np.pi * openstb_physical_frequency * travel_time
-    )
-    openstb_echo_spectrum = (
-        openstb_source_spectrum * openstb_response * travel_phase
-    )
+    travel_phase = np.exp(-2j * np.pi * openstb_physical_frequency * travel_time)
+    openstb_echo_spectrum = openstb_source_spectrum * openstb_response * travel_phase
     openstb_echo = np.fft.ifft(np.fft.ifftshift(openstb_echo_spectrum))
 
     openstb_echo_time = np.arange(n_fft) / sample_rate
-    openstb_echo_time_axis = (
-        openstb_echo_time * c1 / a - 2 * R - delta_tau
-    )
+    openstb_echo_time_axis = openstb_echo_time * c1 / a - 2 * R - delta_tau
     openstb_echo_real = np.real(openstb_echo)
-    openstb_normalization_mask = (
-        (openstb_echo_time_axis >= echo_time_xlim[0])
-        & (openstb_echo_time_axis <= echo_time_xlim[1])
+    openstb_normalization_mask = (openstb_echo_time_axis >= echo_time_xlim[0]) & (
+        openstb_echo_time_axis <= echo_time_xlim[1]
     )
     openstb_normalization = np.max(
         np.abs(openstb_echo_real[openstb_normalization_mask])
     )
-    openstb_echo_normalized = openstb_echo_real / (
-        openstb_normalization + 1e-15
-    )
+    openstb_echo_normalized = openstb_echo_real / (openstb_normalization + 1e-15)
 
     # Hickling and OpenSTB use opposite complex-exponential conventions. Test
     # that conversion by changing only the form-function phase convention.
@@ -970,8 +945,7 @@ if is_hickling_source_case and echo_field == "far-field":
     ax3.set_ylim(-1.1, 1.1)
 
     fig.suptitle(
-        f"Solid {material_sphere} Sphere Echo Comparison - "
-        f"{selected_source_case}"
+        f"Solid {material_sphere} Sphere Echo Comparison - {selected_source_case}"
     )
     plt.tight_layout()
     plt.show()
