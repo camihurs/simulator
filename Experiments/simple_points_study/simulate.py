@@ -137,7 +137,8 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
             {
                 "name": "single_point",
                 "parameters": {
-                    # "position": (5, 500, 10), #Longer distance, to try to see the effect of the Anslie attenuation plugin.
+                    # "position": (5, 500, 10), #Longer distance, to try
+                    # to see the effect of the Anslie attenuation plugin.
                     # "position": (5, 15, 10),
                     "position": (5, 40, 10),
                     # "position": (5, 8, 3),
@@ -243,7 +244,8 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
             "parameters": {
                 "position": [0, 1.2, 0.3],
                 "orientation": q_transducer,
-                # "beampattern": beampattern,  # Comment this line to use an omnidirectional beampattern for the transmitter.
+                # "beampattern": beampattern,  # Comment this line to use an
+                # omnidirectional beampattern for the transmitter.
             },
         }
     )
