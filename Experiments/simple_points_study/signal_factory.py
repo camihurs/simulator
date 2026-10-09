@@ -21,8 +21,8 @@ def build_signal_from_params(sim_params: dict):
                     "rms_spl": 190,
                     "rms_after_window": True,
                     "window": {
-                        "name": "hann", #Estaba tukey
-                        "parameters": {}, #{"alpha": 0.2}
+                        "name": "hann",  # Estaba tukey
+                        "parameters": {},  # {"alpha": 0.2}
                     },
                 },
             }

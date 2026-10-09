@@ -216,8 +216,8 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # starboard) and 15 degrees around x (15 degrees down).
     q_yaw = quaternionic.array.from_rotation_vector([0, 0, np.pi / 2])
     q_tilt = quaternionic.array.from_rotation_vector([np.radians(15), 0, 0])
-    # q_transducer = q_tilt * q_yaw
-    q_transducer = quaternionic.array([1.0, 0.0, 0.0, 0.0])
+    q_transducer = q_tilt * q_yaw
+    # q_transducer = quaternionic.array([1.0, 0.0, 0.0, 0.0])
 
     # Define a common far-field beampattern for the transducers. Note that this is just
     # a distortion attached to the transducers; we could add this to the list of
@@ -244,7 +244,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
             "parameters": {
                 "position": [0, 1.2, 0.3],
                 "orientation": q_transducer,
-                # "beampattern": beampattern,  # Comment this line to use an
+                "beampattern": beampattern,  # Comment this line to use an
                 # omnidirectional beampattern for the transmitter.
             },
         }
@@ -260,7 +260,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
                 "parameters": {
                     "position": [x, 1.2, 0],
                     "orientation": q_transducer,
-                    # "beampattern": beampattern,
+                    "beampattern": beampattern,
                 },
             }
         )
