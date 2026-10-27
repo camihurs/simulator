@@ -47,6 +47,38 @@ def build_signal_from_params(sim_params: dict):
                 },
             }
         )
+    elif signal_mode == "hickling":
+        # Positive-exponential counterpart of Hickling's centered pulse.
+        # Use the solid radius and actual environment c, not the rigid preset.
+        case = sim_params["signal"]["hickling"]
+        c = sim_params["environment"]["sound_speed_ms"]
+        a = sim_params["solid_sphere"]["radius_m"]
+        k0a = case["k0a"]
+        n_cycles = case["n_cycles"]
+        for name, value in (
+            ("sound_speed_ms", c),
+            ("radius_m", a),
+            ("k0a", k0a),
+            ("n_cycles", n_cycles),
+        ):
+            if not np.isfinite(value) or value <= 0:
+                raise ValueError(f"Hickling {name} must be finite and positive")
+        f0 = k0a * c / (2.0 * np.pi * a)
+        sim_baseband_frequency = 0.0
+        # SinusoidBurst subtracts pi/2 internally. Choose initial_phase so its
+        # exponent is 2*pi*f0*(t - T/2), with T = n_cycles/f0.
+        initial_phase = np.pi / 2 - np.pi * n_cycles
+        signal = loader.signal(
+            {
+                "name": "SinusoidBurst:openstb.simulator.system.signal",
+                "parameters": {
+                    "f0": f0,
+                    "n_cycles": n_cycles,
+                    "amplitude": case["amplitude"],
+                    "initial_phase": initial_phase,
+                },
+            }
+        )
     else:
         raise ValueError(f"Unknown signal_mode '{signal_mode}'")
 

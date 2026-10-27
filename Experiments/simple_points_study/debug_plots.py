@@ -1,6 +1,13 @@
 # SPDX-FileCopyrightText: openSTB contributors
 # SPDX-License-Identifier: BSD-2-Clause-Patent
 
+"""OpenSTB diagnostics, with no standalone imports or reference-echo comparison.
+
+Select debug.target_model and debug.plot_style in shared_params.py. The stored
+results must correspond to the chosen source/model; presentation settings do not
+rerun a simulation. screen_style/paper_style control dimensions, fonts and titles.
+"""
+
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -9,20 +16,89 @@ from shared_params import SIM_PARAMS
 from signal_factory import build_signal_from_params
 
 
-def plot_incident_spectrum(s: np.ndarray, sample_rate_plot: float):
+def selected_model():
+    model = SIM_PARAMS["debug"].get("target_model", "rigid")
+    if model not in ("rigid", "solid"):
+        raise ValueError("target_model must be 'rigid' or 'solid'")
+    return model
+
+
+def model_radius():
+    return SIM_PARAMS[selected_model() + "_sphere"]["radius_m"]
+
+
+def results_path():
+    return Path(
+        SIM_PARAMS["debug"].get(
+            "results_path", Path(__file__).resolve().parents[2] / "simple_points.npz"
+        )
+    )
+
+
+def simulation_sample_rate(sample_time, signal_f0):
+    measured = 1.0 / np.mean(np.diff(sample_time))
+    configured = 10.0 * signal_f0 if signal_f0 is not None else 30e3
+    if not np.isclose(measured, configured, rtol=1e-10):
+        raise ValueError(
+            "Stored sample rate disagrees with selected source configuration"
+        )
+    # Avoid a roundoff-induced one-sample change in ceil(1.1*T*fs).
+    return configured
+
+
+def finish_figure():
+    """Apply presentation only; never change plotted data."""
+    style = SIM_PARAMS["debug"].get("plot_style", "screen")
+    if style not in ("screen", "paper"):
+        raise ValueError("plot_style must be 'screen' or 'paper'")
+    fig = plt.gcf()
+    paper = style == "paper"
+    settings = SIM_PARAMS["debug"].get(style + "_style", {})
+    rows = len(fig.axes)
+    default_size = (12, 8) if rows > 1 else (10, 4)
+    if not paper:
+        default_size = (11, 7) if rows > 1 else (11, 4.5)
+    fig.set_size_inches(
+        settings.get("figsize_multi" if rows > 1 else "figsize_single", default_size)
+    )
+    label_size = settings.get("label_size", 38 if paper else 12)
+    tick_size = settings.get("tick_size", 34 if paper else 10)
+    title_size = settings.get("title_size", 14)
+    show_titles = settings.get("show_titles", not paper)
+    for ax in fig.axes:
+        ax.xaxis.label.set_fontsize(label_size)
+        ax.yaxis.label.set_fontsize(label_size)
+        ax.tick_params(labelsize=tick_size)
+        if not ax.get_title():
+            ax.set_title(f"{selected_model().title()} sphere — {ax.get_ylabel()}")
+        if not show_titles:
+            ax.set_title("")
+        ax.title.set_fontsize(title_size)
+        legend = ax.get_legend()
+        if legend:
+            for text in legend.get_texts():
+                text.set_fontsize(settings.get("legend_size", 24 if paper else 10))
+    fig.tight_layout()
+    plt.show()
+
+
+def plot_incident_spectrum(s: np.ndarray, sample_rate_plot: float, carrier=0.0):
     n_fft = int(SIM_PARAMS["debug"].get("incident_fft_points", 16384))
     dt_plot = 1.0 / sample_rate_plot
 
-    incident_fft = np.fft.fft(np.real(s), n_fft) * dt_plot
-    incident_fft *= 2.0
+    if selected_model() == "solid":
+        incident_fft = np.fft.fft(s, max(n_fft, len(s))) * dt_plot
+        n_fft = max(n_fft, len(s))
+    else:
+        incident_fft = 2 * np.fft.fft(np.real(s), n_fft) * dt_plot
 
-    freq = np.fft.fftfreq(n_fft, dt_plot)
+    freq = np.fft.fftfreq(n_fft, dt_plot) + carrier
     positive = freq >= 0
     freq_positive = freq[positive]
     incident_fft_positive = incident_fft[positive]
 
     c_plot = SIM_PARAMS["environment"]["sound_speed_ms"]
-    a = SIM_PARAMS["rigid_sphere"]["radius_m"]
+    a = model_radius()
 
     k_positive = 2.0 * np.pi * freq_positive / c_plot
     ka_positive = k_positive * a
@@ -37,13 +113,16 @@ def plot_incident_spectrum(s: np.ndarray, sample_rate_plot: float):
     ax1.set_ylabel("|g(ka)|", fontsize=38)
     ax1.tick_params(axis="x", labelsize=34)
     ax1.tick_params(axis="y", labelsize=34)
-    # ax1.set_title("Incident spectrum g(ka) - magnitude")
+    ax1.set_title(
+        f"{selected_model().title()} sphere — incident-signal spectrum vs ka: magnitude"
+    )
     ax1.grid(True, alpha=0.3)
     ax1.set_xlim(0, 30)
 
     ax2.plot(ka_positive, phase, "k-", linewidth=1.5)
     ax2.set_xlabel("ka", fontsize=38)
     ax2.set_ylabel(r"$\angle g(ka)\ \mathrm{(rad)}$", fontsize=38)
+    ax2.set_title("Incident-signal spectrum vs ka: wrapped phase")
     ax2.tick_params(axis="x", labelsize=34)
     ax2.tick_params(axis="y", labelsize=34)
     # ax2.set_ylabel("Phase of g(ka) (radians)")
@@ -56,8 +135,7 @@ def plot_incident_spectrum(s: np.ndarray, sample_rate_plot: float):
     ax2.set_xlim(0, 30)
     ax2.set_ylim(0, 2 * np.pi)
 
-    plt.tight_layout()
-    plt.show()
+    finish_figure()
 
 
 def plot_incident_spectrum_hz(
@@ -84,7 +162,7 @@ def plot_incident_spectrum_hz(
     # Auto frequency window based on the signal band.
     fmin = float(signal.minimum_frequency)
     fmax = float(signal.maximum_frequency)
-    bw = max(fmax - fmin, 1.0)
+    bw = max(fmax - fmin, 4.0 / signal.duration)
     pad = 0.25 * bw
     x0 = max(0.0, fmin - pad)
     x1 = fmax + pad
@@ -93,12 +171,15 @@ def plot_incident_spectrum_hz(
     plt.plot(f, mag_db, "b-", linewidth=1.2)
     plt.xlabel("Frequency [Hz]")
     plt.ylabel("Magnitude [dB, normalized]")
-    plt.title("Incident spectrum in frequency domain (matches simulation FFT pipeline)")
+    plt.title(
+        f"{selected_model().title()} sphere — incident-signal spectrum vs physical frequency (dB)\n"
+        "Recalculated using OpenSTB's FFT procedure:\n"
+        "complex source, same sampling, recording length + guard samples"
+    )
     plt.grid(True, alpha=0.3)
     plt.xlim(x0, x1)
     plt.ylim(-120, 5)
-    plt.tight_layout()
-    plt.show()
+    finish_figure()
 
     # Linear magnitude view (normalized)
     plt.figure(figsize=(10, 4))
@@ -107,99 +188,135 @@ def plot_incident_spectrum_hz(
     plt.ylabel("Magnitude [linear, normalised]", fontsize=32)
     plt.xticks(fontsize=34)
     plt.yticks(fontsize=34)
-    # plt.title("Incident spectrum in frequency domain (linear scale)")
+    plt.title(
+        f"{selected_model().title()} sphere — incident-signal spectrum vs physical frequency\n"
+        "Linear magnitude, normalized to its maximum"
+    )
     plt.grid(True, alpha=0.3)
     plt.xlim(x0, x1)
     plt.ylim(0.0, 1.05)
-    plt.tight_layout()
-    plt.show()
+    finish_figure()
 
 
 def plot_form_function_from_dump():
-    dump_path = Path(SIM_PARAMS["debug"]["plugin_dump_path"])
-
+    model = selected_model()
+    key = "solid_plugin_dump_path" if model == "solid" else "plugin_dump_path"
+    dump_path = Path(SIM_PARAMS["debug"][key])
     if not dump_path.exists():
         print(f"Plugin dump not found: {dump_path}")
         return
-
-    data = np.load(dump_path)
-    ka_dump = data["ka"]
-    mag_dump = data["ff_magnitude"]
-    phase_dump = data["ff_phase"]
-    theta_sample = float(data["theta_sample_rad"])
-    print("ka max in dump:", float(ka_dump.max()))
-
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
-
-    ax1.plot(ka_dump, mag_dump, "k-", linewidth=1.5)
-    ax1.set_xlabel("ka", fontsize=38)
-    ax1.set_ylabel("|f(ka)|", fontsize=38)
-    ax1.tick_params(axis="x", labelsize=34)
-    ax1.tick_params(axis="y", labelsize=34)
-    # ax1.set_title("Form Function from plugin dump - Magnitude")
-    ax1.grid(True, alpha=0.3)
-    ax1.set_xlim(0, 14)
-    ax1.set_ylim(0, 1.5)
-
-    ax2.plot(ka_dump, phase_dump, "k-", linewidth=1.5)
-    ax2.set_xlabel("ka", fontsize=38)
-    ax2.set_ylabel(r"$\angle f(ka)\ \mathrm{(rad)}$", fontsize=38)
-    # ax2.set_ylabel("arg[f(ka)] (radians)", fontsize=22)
-    ax2.tick_params(axis="x", labelsize=34)
-    ax2.tick_params(axis="y", labelsize=34)
-    # ax2.set_title(f"Form Function from plugin dump - Phase (theta={theta_sample:.4f} rad)")
-    ax2.grid(True, alpha=0.3)
-    ax2.set_xlim(0, 14)
-    ax2.set_ylim(0, 2 * np.pi)
-    ax2.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
-    ax2.set_yticklabels(
-        [r"$0$", r"$\frac{\pi}{2}$", r"$\pi$", r"$\frac{3\pi}{2}$", r"$2\pi$"]
+    with np.load(dump_path, allow_pickle=False) as data:
+        ka = np.asarray(data["ka"]).ravel()
+        if model == "solid":
+            if str(data["target_model"].item()) != "solid_sphere":
+                raise ValueError("Selected dump is not a solid-sphere dump")
+            positive = data["f_hz"] > 0
+            ka = ka[positive]
+            ff = data["ff_hickling_complex"][positive]
+            converted = data["ff_openstb_complex"][positive]
+            band = data["validation_ka_bounds"].copy()
+        else:
+            ff = data["ff_complex"].ravel()
+            theta = float(data["theta_sample_rad"])
+    if ff.size != ka.size:
+        raise ValueError("Incompatible form-function dump dimensions")
+    order = np.argsort(ka)
+    ka, ff = ka[order], ff[order]
+    if model == "solid":
+        converted = converted[order]
+    magnitude = abs(ff)
+    phase = np.mod(np.angle(ff), 2 * np.pi)
+    # Preserve both historical rigid views: focused and full ka range.
+    limits = (
+        [14, float(ka.max())]
+        if model == "rigid"
+        else [SIM_PARAMS["debug"].get("solid_form_function_ka_max", 40)]
     )
-    # ax2.set_yticklabels(["0", "pi/2", "pi", "3pi/2", "2pi"])
+    for limit in limits:
+        fig, (ax1, ax2) = plt.subplots(2, 1)
+        ax1.plot(
+            ka, magnitude, label="Hickling modal" if model == "solid" else "OpenSTB"
+        )
+        ax1.set(
+            xlabel="ka",
+            ylabel="|f(ka)|",
+            xlim=(0, limit),
+            title=(
+                f"{model.title()} sphere — form-function magnitude from OpenSTB plugin dump\n"
+                f"Displayed range: 0 ≤ ka ≤ {limit:g}"
+            ),
+        )
+        if model == "rigid":
+            ax1.set_ylim(0, 1.5)
+        else:
+            visible = ka <= limit
+            ax1.set_ylim(0, 1.1 * magnitude[visible].max() if np.any(visible) else 1)
+        ax2.plot(ka, phase, label="Hickling modal" if model == "solid" else "OpenSTB")
+        if model == "solid":
+            ax2.plot(
+                ka,
+                np.mod(np.angle(converted), 2 * np.pi),
+                "--",
+                label="Conjugated OpenSTB (before frequency mask)",
+            )
+            ax2.legend()
+            ax1.legend()
+            if len(band):
+                for ax in (ax1, ax2):
+                    ax.axvspan(*band, alpha=0.08, color="green")
+        ax2.set(
+            xlabel="ka",
+            ylabel="arg[f(ka)] [rad]",
+            xlim=(0, limit),
+            ylim=(0, 2 * np.pi),
+            title=(
+                (
+                    "OpenSTB plugin dump — wrapped phase: Hickling and conjugated conventions\n"
+                    "Before frequency mask: phase shown before excluded bins are set to zero\n"
+                    + (
+                        f"Green region: {band[0]:g} ≤ ka ≤ {band[1]:g}, retained for the echo; "
+                        "outside: zero response"
+                        if len(band)
+                        else "No green region: no reference-band restriction"
+                    )
+                    + "\nOnly positive physical frequencies contribute; phase at zero response is undefined"
+                )
+                if model == "solid"
+                else f"OpenSTB plugin dump — wrapped phase, theta={theta:.5f} rad"
+            ),
+        )
+        for ax in (ax1, ax2):
+            ax.grid(True, alpha=0.3)
+        finish_figure()
+    if model == "solid":
+        nonzero = (ka > 0) & (abs(ff) > 1e-12)
+        plt.figure()
+        plt.plot(ka[nonzero], -np.unwrap(np.angle(ff[nonzero])) / ka[nonzero])
+        plt.xlabel("ka")
+        plt.ylabel("-unwrapped arg(f) / ka")
+        plt.title("Solid sphere — Hickling phase parameter (plugin dump)")
+        plt.xlim(0, limits[0])
+        plt.grid(True, alpha=0.3)
+        finish_figure()
 
-    plt.tight_layout()
-    plt.show()
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
-
-    ax1.plot(ka_dump, mag_dump, "b-", linewidth=1.5)
-    ax1.set_xlabel("ka")
-    ax1.set_ylabel("|f(ka)|")
-    ax1.set_title("Form Function from plugin dump - Magnitude")
-    ax1.grid(True, alpha=0.3)
-    ax1.set_xlim(0, float(ka_dump.max()))
-    ax1.set_ylim(0, 1.5)
-
-    ax2.plot(ka_dump, phase_dump, "r-", linewidth=1.5)
-    ax2.set_xlabel("ka")
-    ax2.set_ylabel("arg[f(ka)] (radians)")
-    ax2.set_title(
-        f"Form Function from plugin dump - Phase (theta={theta_sample:.4f} rad)"
-    )
-    ax2.grid(True, alpha=0.3)
-    ax2.set_xlim(0, float(ka_dump.max()))
-    ax2.set_ylim(0, 2 * np.pi)
-    ax2.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
-    ax2.set_yticklabels(["0", "pi/2", "pi", "3pi/2", "2pi"])
-
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_echo_spectrum(trace: np.ndarray, sample_rate: float):
+def plot_echo_spectrum(trace: np.ndarray, sample_rate: float, carrier=0.0):
     n_fft = int(SIM_PARAMS["debug"].get("echo_fft_points", 16384))
     dt = 1.0 / sample_rate
 
-    echo_fft = np.fft.fft(np.real(trace), n_fft) * dt
-    echo_fft *= 2.0
+    if selected_model() == "solid":
+        n_fft = max(n_fft, len(trace))
+        echo_fft = np.fft.fft(trace, n_fft) * dt
+    else:
+        echo_fft = 2 * np.fft.fft(np.real(trace), n_fft) * dt
 
-    freq = np.fft.fftfreq(n_fft, dt)
+    freq = np.fft.fftfreq(n_fft, dt) + carrier
     positive = freq >= 0
     freq_positive = freq[positive]
     echo_fft_positive = echo_fft[positive]
 
     c_plot = SIM_PARAMS["environment"]["sound_speed_ms"]
-    a = SIM_PARAMS["rigid_sphere"]["radius_m"]
+    a = model_radius()
     k_positive = 2.0 * np.pi * freq_positive / c_plot
     ka_positive = k_positive * a
 
@@ -224,16 +341,17 @@ def plot_echo_spectrum(trace: np.ndarray, sample_rate: float):
     ax2.set_xlim(0, 30)
     ax2.set_ylim(0, 2 * np.pi)
 
-    plt.tight_layout()
-    plt.show()
+    finish_figure()
 
 
-def plot_echo_spectrum_hz(trace: np.ndarray, sample_rate: float):
+def plot_echo_spectrum_hz(trace: np.ndarray, sample_rate: float, carrier=0.0):
     n_fft = int(SIM_PARAMS["debug"].get("echo_fft_points", 16384))
     dt = 1.0 / sample_rate
 
+    if selected_model() == "solid":
+        n_fft = max(n_fft, len(trace))
     E = np.fft.fftshift(np.fft.fft(trace, n_fft))
-    f = np.fft.fftshift(np.fft.fftfreq(n_fft, dt))
+    f = np.fft.fftshift(np.fft.fftfreq(n_fft, dt)) + carrier
 
     mag = np.abs(E)
     mag_norm = mag / (np.max(mag) + 1e-30)
@@ -262,8 +380,7 @@ def plot_echo_spectrum_hz(trace: np.ndarray, sample_rate: float):
     plt.grid(True, alpha=0.3)
     plt.xlim(0, x1)
     plt.ylim(-120, 5)
-    plt.tight_layout()
-    plt.show()
+    finish_figure()
 
     # linear view
     plt.figure(figsize=(10, 4))
@@ -272,26 +389,33 @@ def plot_echo_spectrum_hz(trace: np.ndarray, sample_rate: float):
     plt.ylabel("Magnitude [linear, normalized]", fontsize=32)
     plt.xticks(fontsize=34)
     plt.yticks(fontsize=34)
-    # plt.title("Echo spectrum in frequency domain (linear scale)")
+    plt.title(
+        f"{selected_model().title()} sphere — echo spectrum vs physical frequency\n"
+        "Linear magnitude, normalized to its maximum"
+    )
     plt.grid(True, alpha=0.3)
     plt.xlim(0, x1)
     plt.ylim(0.0, 1.05)
-    plt.tight_layout()
-    plt.show()
+    finish_figure()
 
 
 def main():
+    selected_model()
     signal_mode = SIM_PARAMS["signal"]["mode"]
     signal, f0, sim_baseband_frequency = build_signal_from_params(SIM_PARAMS)
 
+    with np.load(results_path(), allow_pickle=False) as stored:
+        result_carrier = float(stored["baseband_frequency"])
+    if not np.isclose(result_carrier, sim_baseband_frequency):
+        raise ValueError("Result carrier disagrees with selected incident source")
     if SIM_PARAMS["debug"].get("plot_incident", False):
         # Diagnostic: sample the incident signal on the exact simulation time grid
         # used to generate the echoes in simple_points.npz.
-        results = np.load("simple_points.npz")
+        results = np.load(results_path())
         t_sim = results["sample_time"]
         s_sim = signal.sample(t_sim, sim_baseband_frequency)
 
-        fs_sim = 1.0 / np.mean(np.diff(t_sim))
+        fs_sim = simulation_sample_rate(t_sim, f0)
         if f0 is not None:
             print(
                 f"Simulation-grid incident sampling: fs={fs_sim:.1f} Hz, f0={f0:.1f} Hz, samples/cycle={fs_sim / f0:.3f}"
@@ -320,7 +444,7 @@ def main():
         # Durations: emitted chirp vs full hydrophone recording window
         chirp_duration_s = float(signal.duration)
         hydro_duration_s = float(t_sim[-1] - t_sim[0]) if len(t_sim) > 1 else 0.0
-        print(f"Chirp duration: {chirp_duration_s * 1e3:.2f} ms")
+        print(f"Incident pulse duration: {chirp_duration_s * 1e3:.2f} ms")
         print(f"Hydrophone trace duration: {hydro_duration_s * 1e3:.2f} ms")
 
         # Second incident plot: reconstructed passband only, over full recording window
@@ -331,19 +455,20 @@ def main():
         plt.ylabel(
             "Amplitude [Pa]", fontsize=38
         )  # o "Normalized amplitude" si normalizas
-        # plt.title("Incident signal", fontsize=38)
+        plt.title(
+            f"{selected_model().title()} sphere — incident {signal_mode} (passband)"
+        )
 
         plt.xticks(fontsize=34)
         plt.yticks(fontsize=34)
 
         plt.grid(True, alpha=0.3)
         plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
-        plt.xlim(t_sim[0] * 1e3, t_sim[-1] * 1e3)
-        plt.tight_layout()
-        plt.show()
+        plt.xlim(0, signal.duration * 1.05e3)
+        finish_figure()
 
         if SIM_PARAMS["debug"].get("plot_incident_spectrum", False):
-            plot_incident_spectrum(s_sim, fs_sim)
+            plot_incident_spectrum(s_sim, fs_sim, sim_baseband_frequency)
             plot_incident_spectrum_hz(
                 signal=signal,
                 sample_rate=fs_sim,
@@ -355,13 +480,15 @@ def main():
         plot_form_function_from_dump()
 
     if SIM_PARAMS["debug"].get("plot_echo_linear_pressure", True):
-        results = np.load("simple_points.npz")
+        results = np.load(results_path())
         t_echo = results["sample_time"]
         P_echo = results["pressure"]
-        fs_echo = 1.0 / np.mean(np.diff(t_echo))
+        fs_echo = simulation_sample_rate(t_echo, f0)
 
-        ping_to_plot = 31  # cambia aquí el ping que quieras ver
-        rx_idx = 0
+        ping_to_plot = int(SIM_PARAMS["debug"].get("ping_index", 31))
+        rx_idx = int(SIM_PARAMS["debug"].get("receiver_index", 0))
+        if not (0 <= ping_to_plot < P_echo.shape[0] and 0 <= rx_idx < P_echo.shape[1]):
+            raise ValueError("Selected ping/receiver is outside stored results")
         trace_echo_bb = P_echo[ping_to_plot, rx_idx, :]  # complejo en banda base
         trace_echo_pb = np.real(
             trace_echo_bb * np.exp(1j * 2.0 * np.pi * sim_baseband_frequency * t_echo)
@@ -379,12 +506,13 @@ def main():
         plt.ylabel("Amplitude [Pa]", fontsize=38)
         plt.xticks(fontsize=34)
         plt.yticks(fontsize=34)
-        # plt.title(f"Echo (passband view), ping {ping_to_plot}, rx {rx_idx}")
+        plt.title(
+            f"{selected_model().title()} sphere — echo, ping {ping_to_plot}, rx {rx_idx}"
+        )
         plt.grid(True, alpha=0.3)
         plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
         plt.legend(fontsize=30)
-        plt.tight_layout()
-        plt.show()
+        finish_figure()
 
         # Incident signal on the same hydrophone time axis (full trace)-------------------------------------
         incident_bb_on_echo_grid = signal.sample(t_echo, sim_baseband_frequency)
@@ -421,19 +549,18 @@ def main():
             label="echo passband (normalized)",
         )
         plt.xlabel("Time [ms]", fontsize=38)
-        plt.ylabel("Amplitude", fontsize=38)
+        plt.ylabel("Individually normalized amplitude", fontsize=38)
         plt.title(
-            "Incident and echo on full hydrophone trace (normalized for comparison)",
+            "Incident signal and echo — each divided by its own peak amplitude",
             fontsize=38,
         )
         plt.grid(True, alpha=0.3)
         plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
         plt.xlim(t_echo[0] * 1e3, t_echo[-1] * 1e3)
         plt.legend(fontsize=34)
-        plt.tight_layout()
-        plt.show()
+        finish_figure()
 
-        # With real amplitudes (no normalization):------------------------------
+        # Original amplitudes (no normalization):------------------------------
         plt.figure(figsize=(10, 4))
         plt.plot(
             t_echo * 1e3,
@@ -452,24 +579,29 @@ def main():
             label="echo passband",
         )
         plt.xlabel("Time [ms]", fontsize=38)
-        plt.ylabel("Amplitude", fontsize=38)
+        plt.ylabel("Pressure [Pa] — not normalized", fontsize=38)
         plt.title(
-            "Incident and echo on full hydrophone trace (with real amplitudes)",
+            "Incident signal and echo — original amplitudes, no normalization",
             fontsize=38,
         )
         plt.grid(True, alpha=0.3)
         plt.axhline(y=0.0, color="k", linestyle="-", linewidth=0.5)
         plt.xlim(t_echo[0] * 1e3, t_echo[-1] * 1e3)
         plt.legend(fontsize=34)
-        plt.tight_layout()
-        plt.show()
+        finish_figure()
 
         if SIM_PARAMS["debug"].get("plot_echo_spectrum", True):
-            plot_echo_spectrum(trace_echo_pb, fs_echo)
-            plot_echo_spectrum_hz(trace_echo_pb, fs_echo)
+            spectrum_trace = (
+                trace_echo_bb if selected_model() == "solid" else trace_echo_pb
+            )
+            spectrum_carrier = (
+                sim_baseband_frequency if selected_model() == "solid" else 0
+            )
+            plot_echo_spectrum(spectrum_trace, fs_echo, spectrum_carrier)
+            plot_echo_spectrum_hz(spectrum_trace, fs_echo, spectrum_carrier)
 
     # Theta diagnostic across pings (current simple_points_study geometry).
-    results = np.load("simple_points.npz")
+    results = np.load(results_path())
     ping_t = results["ping_start_time"]
 
     start_pos = np.array([0.0, 0.0, 0.0])
@@ -502,7 +634,7 @@ def main():
     print("first 10 theta(deg):", np.degrees(theta[:10]))
     print("theta ping 14 [rad]:", float(theta[14]))
 
-    fs = 1.0 / np.mean(np.diff(results["sample_time"]))
+    fs = simulation_sample_rate(results["sample_time"], f0)
     Ns = len(results["sample_time"])
     gb = int(np.ceil(signal.duration * 1.1 * fs))
     nfft_sim = Ns + gb
@@ -513,8 +645,8 @@ def main():
     print("  gb:", gb)
     print("  Nfft_sim = Ns + gb:", nfft_sim)
     print("  df_sim [Hz]:", df_sim)
-    print("  n_fft in RigidSphereEcho.py:", 16384)
-    print("  df_RigidSphereEcho [Hz]:", fs / 16384.0)
+    print("  Reference standalone FFT points:", 16384)
+    print("  df_reference [Hz]:", fs / 16384.0)
 
 
 if __name__ == "__main__":

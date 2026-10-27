@@ -162,8 +162,9 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
         }
     )
 
-    # Apply two distortions: spherical spreading (1/r scaling to the amplitude on
-    # each direction) and acoustic attenuation.
+    # For controlled sphere comparisons, enable only ONE sphere model below.
+    # Keep unrelated distortions disabled; stacking rigid and solid multiplies
+    # their responses and does not represent two independent targets.
     config["distortion"] = [
         # loader.distortion(
         #     {
@@ -189,19 +190,37 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
         #         },
         #     }
         # ),
+        # loader.distortion(
+        #     {
+        #         "name": "RigidSphereFormFunction:openstb.simulator.distortion.rigid_sphere",
+        #         "parameters": {
+        #             "radius_m": SIM_PARAMS["rigid_sphere"]["radius_m"],
+        #             "n_terms": SIM_PARAMS["rigid_sphere"]["n_terms"],
+        #             "scale": SIM_PARAMS["rigid_sphere"]["scale"],
+        #             "ka_eps": SIM_PARAMS["rigid_sphere"]["ka_eps"],
+        #             "debug_dump": SIM_PARAMS["debug"]["dump_form_function_from_plugin"],
+        #             "debug_dump_path": SIM_PARAMS["debug"]["plugin_dump_path"],
+        #         },
+        #     }
+        # ),
+        # Active Armco iron model. The paper band applies only in Hickling mode.
         loader.distortion(
             {
-                "name": "RigidSphereFormFunction:openstb.simulator.distortion.rigid_sphere",
+                "name": "SolidSphereFormFunction:openstb.simulator.distortion.solid_sphere",
                 "parameters": {
-                    "radius_m": SIM_PARAMS["rigid_sphere"]["radius_m"],
-                    "n_terms": SIM_PARAMS["rigid_sphere"]["n_terms"],
-                    "scale": SIM_PARAMS["rigid_sphere"]["scale"],
-                    "ka_eps": SIM_PARAMS["rigid_sphere"]["ka_eps"],
-                    "debug_dump": SIM_PARAMS["debug"]["dump_form_function_from_plugin"],
-                    "debug_dump_path": SIM_PARAMS["debug"]["plugin_dump_path"],
+                    **SIM_PARAMS["solid_sphere"],
+                    "validation_ka_bounds": (
+                        SIM_PARAMS["signal"]["hickling"]["integration_ka_bounds"]
+                        if SIM_PARAMS["signal"]["mode"] == "hickling"
+                        else None
+                    ),
+                    "debug_dump": SIM_PARAMS["debug"][
+                        "dump_solid_form_function_from_plugin"
+                    ],
+                    "debug_dump_path": SIM_PARAMS["debug"]["solid_plugin_dump_path"],
                 },
             }
-        )
+        ),
     ]
 
     # signal, _, sim_baseband_frequency = build_signal_from_params(SIM_PARAMS)
@@ -216,8 +235,8 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # starboard) and 15 degrees around x (15 degrees down).
     q_yaw = quaternionic.array.from_rotation_vector([0, 0, np.pi / 2])
     q_tilt = quaternionic.array.from_rotation_vector([np.radians(15), 0, 0])
-    q_transducer = q_tilt * q_yaw
-    # q_transducer = quaternionic.array([1.0, 0.0, 0.0, 0.0])
+    # q_transducer = q_tilt * q_yaw
+    q_transducer = quaternionic.array([1.0, 0.0, 0.0, 0.0])
 
     # Define a common far-field beampattern for the transducers. Note that this is just
     # a distortion attached to the transducers; we could add this to the list of
@@ -244,7 +263,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
             "parameters": {
                 "position": [0, 1.2, 0.3],
                 "orientation": q_transducer,
-                "beampattern": beampattern,  # Comment this line to use an
+                # "beampattern": beampattern,  # Comment this line to use an
                 # omnidirectional beampattern for the transmitter.
             },
         }
@@ -260,7 +279,7 @@ def simulate(cluster: Literal["local"] | Literal["mpi"]):
                 "parameters": {
                     "position": [x, 1.2, 0],
                     "orientation": q_transducer,
-                    "beampattern": beampattern,
+                    # "beampattern": beampattern,
                 },
             }
         )
