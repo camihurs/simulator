@@ -25,6 +25,8 @@ from openstb.simulator.plugin import loader
 def simulate(cluster: Literal["local"] | Literal["mpi"]):
     # Begin our configuration dictionary.
     config: simple_points.SimplePointConfig = {}
+    # Single-target diagnostics: travel time for every ping/receiver, plus reflectivity.
+    config["save_echo_metadata"] = True
 
     # Each plugin is defined through a plugin specification dictionary. This takes the
     # name the plugin is registered under (see pyproject.toml for a list of the included

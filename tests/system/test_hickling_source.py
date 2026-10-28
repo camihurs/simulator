@@ -35,7 +35,7 @@ def test_hickling_factory_matches_standalone():
         if isinstance(node, ast.Assign)
         or (isinstance(node, ast.FunctionDef) and node.name == "build_source")
     ]
-    reference = {"np": np}
+    reference = {"np": np, "Path": Path, "__file__": str(path)}
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(path), "exec"), reference)
     reference.update(
         SOURCE_CASE="hickling_fig16_max",

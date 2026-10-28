@@ -30,7 +30,7 @@ SIM_PARAMS = {
         "ka_eps": 1e-8,
     },
     "signal": {
-        "mode": "hickling",  # "sine", "lfm", or "hickling"
+        "mode": "lfm",  # "sine", "lfm", or "hickling"
         "n_cycles": 2,  # used only for "sine" mode
         "amplitude": 1.0,  # used only for "sine" mode
         "initial_phase": 0.0,  # used only for "sine" mode

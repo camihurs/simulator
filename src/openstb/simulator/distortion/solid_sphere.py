@@ -204,6 +204,9 @@ class SolidSphereFormFunction(Distortion):
                         target_model="solid_sphere",
                         response_geometry="far_field_backscatter_approximation",
                         ping_time_s=ping_time,
+                        # Optional for legacy/mocked TravelTimeResult objects.
+                        **({"travel_time_s": float(np.asarray(tt_result.travel_time)[0, 0])}
+                           if hasattr(tt_result, "travel_time") else {}),
                         f_hz=frequency,
                         ka=ka,
                         ff_hickling_complex=ff_hickling,

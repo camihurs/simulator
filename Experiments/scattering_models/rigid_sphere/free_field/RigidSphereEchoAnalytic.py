@@ -9,6 +9,7 @@ validation script.  This file is the clean, general-purpose standalone.
 """
 
 from pathlib import Path
+import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,13 +20,18 @@ from scipy.special import eval_legendre, spherical_jn, spherical_yn
 # =============================================================================
 
 # Available cases: "rudgers_fig6", "tone_burst", "lfm_chirp".
-SOURCE_CASE = "lfm_chirp"
+SOURCE_CASE = "rudgers_fig6"
 
 # Normal use produces three figures: source, form function, and echo.  The options
 # below add scientific diagnostics for the Rudgers reference case.
 SHOW_VALIDATION_PLOTS = True
 COMPARE_DIRECT_RUDGERS = True
 COMPARE_OPENSTB_DUMP = True
+COMPARE_OPENSTB_ECHO = True
+OPENSTB_RESULTS = Path(__file__).resolve().parents[4] / "simple_points.npz"
+OPENSTB_ECHO_PING_INDEX = 0
+OPENSTB_ECHO_RECEIVER_INDEX = 0
+OPENSTB_ECHO_PLOT_WINDOW_MS = None
 
 # Target and medium.
 SOUND_SPEED_M_S = 1480.0
@@ -319,9 +325,8 @@ def plot_standard_results(
         alpha=0.65,
         label="analytic envelope",
     )
-    ax_baseband.set(
-        xlabel="Time [ms]", ylabel="Amplitude", title=str(source["label"])
-    )
+    ax_baseband.set(xlabel="Time [ms]", ylabel="Amplitude",
+                    title="Standalone incident complex signal used for echo synthesis\n" + str(source["label"]))
     ax_baseband.grid(True, alpha=0.3)
     ax_baseband.legend()
 
@@ -352,8 +357,10 @@ def plot_standard_results(
         ax_passband.grid(True, alpha=0.3)
         ax_passband.legend()
 
-        active_xlim_ms = (-0.02 * float(source["duration_s"]) * 1e3,
-                          1.02 * float(source["duration_s"]) * 1e3)
+        active_xlim_ms = (
+            -0.02 * float(source["duration_s"]) * 1e3,
+            1.02 * float(source["duration_s"]) * 1e3,
+        )
         ax_baseband.set_xlim(*active_xlim_ms)
         ax_passband.set_xlim(*active_xlim_ms)
 
@@ -375,7 +382,7 @@ def plot_standard_results(
     ax_mag.set(
         xlabel="ka",
         ylabel="|f(ka)|",
-        title="Rigid-sphere form function",
+        title="Rigid-sphere form function calculated by the standalone",
         xlim=(0, FORM_FUNCTION_PLOT_KA_MAX),
     )
     ax_mag.grid(True, alpha=0.3)
@@ -396,7 +403,8 @@ def plot_standard_results(
     ax_echo.set(
         xlabel="Time relative to FFT origin [ms]",
         ylabel="Normalized pressure",
-        title="Rigid-sphere echo (target response only)",
+        title=("Rigid-sphere echo calculated by the analytic standalone (target only)\n"
+               "Complex-source FFT/IFFT synthesis, not direct Rudgers integration"),
     )
     ax_echo.grid(True, alpha=0.3)
     visible_echo = np.abs(echo) > 1e-3
@@ -442,7 +450,8 @@ def plot_rudgers_validation(
         "--",
         label="Rudgers defining integral",
     )
-    ax.set(xlabel="ka", ylabel="Normalized |g(ka)|", xlim=(0, 30))
+    ax.set(xlabel="ka", ylabel="Normalized |g(ka)|", xlim=(0, 30),
+           title="Incident-signal spectrum: standalone complex-source FFT vs Rudgers integral\nIndependently normalized magnitudes")
     ax.grid(True, alpha=0.3)
     ax.legend()
     fig.tight_layout()
@@ -453,12 +462,12 @@ def plot_rudgers_validation(
         echo_fft = normalized(result["echo_passband_centered"])
 
         fig, ax = plt.subplots(figsize=(11, 4.5))
-        ax.plot(tau_fft, echo_fft, label="analytic FFT/IFFT")
-        ax.plot(tau_direct, echo_direct, "--", label="direct Rudgers Eq. (8)")
+        ax.plot(tau_fft, echo_fft, label="Standalone complex-source FFT/IFFT")
+        ax.plot(tau_direct, echo_direct, "--", label="Standalone numerical integration of Rudgers Eq. (8)")
         ax.set(
             xlabel=r"Normalized time $\tau=tc/a$",
             ylabel="Normalized pressure",
-            title="Rudgers reference echo",
+            title="Both echoes calculated by the standalone: FFT/IFFT vs Rudgers Eq. (8)\nNo OpenSTB dump used in this comparison",
             xlim=(-4, 10),
             ylim=(-1.1, 1.1),
         )
@@ -507,7 +516,8 @@ def compare_openstb_dump() -> None:
     fig, (ax_mag, ax_phase) = plt.subplots(2, 1, figsize=(11, 7))
     ax_mag.plot(ka[order], np.abs(ff_openstb[order]), label="OpenSTB dump")
     ax_mag.plot(ka[order], np.abs(ff_standalone[order]), "--", label="standalone")
-    ax_mag.set(xlabel="ka", ylabel="|f(ka)|")
+    ax_mag.set(xlabel="ka", ylabel="|f(ka)|",
+               title="Rigid-sphere form function: OpenSTB plugin dump vs standalone recomputation\nSame dump ka grid and stored scattering angle")
     ax_mag.grid(True, alpha=0.3)
     ax_mag.legend()
     ax_phase.plot(
@@ -523,6 +533,205 @@ def compare_openstb_dump() -> None:
     ax_phase.grid(True, alpha=0.3)
     ax_phase.legend()
     fig.tight_layout()
+
+
+def compare_openstb_echo(source, dump_path=None, results_path=None):
+    """Compare independent synthesis with one controlled OpenSTB trace.
+
+    No peak alignment, fitted gain, or reuse of the plugin's output spectrum.
+    Propagation is included analytically, then the plotting time axis subtracts
+    that known delay. Metrics use independently peak-normalized complex samples; no phase fitting.
+    """
+    dump_path = Path(OPENSTB_DUMP if dump_path is None else dump_path)
+    results_path = Path(OPENSTB_RESULTS if results_path is None else results_path)
+    try:
+        with np.load(dump_path, allow_pickle=False) as stored:
+            dump = {name: stored[name].copy() for name in stored.files}
+        with np.load(results_path, allow_pickle=False) as stored:
+            t = stored["sample_time"].copy()
+            pressure = stored["pressure"].copy()
+            pings = stored["ping_start_time"].copy()
+            carrier = float(stored["baseband_frequency"])
+            dimensions = list(stored["pressure_dimensions"])
+            if "echo_travel_time_s" not in stored:
+                raise ValueError(
+                    "result lacks travel times; rerun simulate.py with save_echo_metadata=True"
+                )
+            travel_times = stored["echo_travel_time_s"].copy()
+            reflectivity = float(stored["echo_target_reflectivity"])
+            if "echo_scattering_angle_rad" not in stored:
+                raise ValueError("result lacks scattering angles; rerun simulate.py")
+            angles = stored["echo_scattering_angle_rad"].copy()
+            if int(stored["echo_metadata_schema"]) != 1:
+                raise ValueError("unsupported echo metadata schema")
+            if list(stored["echo_travel_time_dimensions"]) != ["ping", "channel"]:
+                raise ValueError("unsupported travel-time dimensions")
+            if list(stored["echo_distortion_classes"]) != ["RigidSphereFormFunction"]:
+                raise ValueError("comparison requires only the rigid-sphere distortion")
+        if dimensions != ["ping", "channel", "sample_time"]:
+            raise ValueError("unsupported result dimensions")
+        if (
+            pressure.ndim != 3
+            or pressure.shape[0] != len(pings)
+            or pressure.shape[2] != len(t)
+            or t.size < 2
+        ):
+            raise ValueError("incompatible pressure dimensions/time grid")
+        if (
+            travel_times.shape != pressure.shape[:2]
+            or not np.isfinite(travel_times).all()
+        ):
+            raise ValueError("travel-time table does not match pressure")
+        if not np.isfinite(reflectivity):
+            raise ValueError("nonfinite target reflectivity")
+        if dump["S_in_complex"].ndim != 1:
+            raise ValueError("expected a 1D representative incident spectrum")
+        for key, expected in (("radius_m", SPHERE_RADIUS_M), ("n_terms", N_TERMS)):
+            if not np.isclose(float(dump[key]), expected, rtol=1e-12, atol=0):
+                raise ValueError(f"standalone/dump mismatch: {key}")
+        fs = float(source["sample_rate_hz"])
+        if not np.allclose(t, np.arange(t.size) / fs, rtol=1e-12, atol=1e-14):
+            raise ValueError("standalone source and result sampling disagree")
+        if not np.isclose(carrier, float(source["baseband_frequency_hz"]), atol=1e-12):
+            raise ValueError("source and result carrier disagree")
+        if "baseband_frequency_hz" in dump and not np.isclose(
+            carrier, float(dump["baseband_frequency_hz"]), atol=1e-12
+        ):
+            raise ValueError("dump and result carrier disagree")
+        nfft = t.size + int(np.ceil(float(source["duration_s"]) * 1.1 * fs))
+        frequency = np.fft.fftshift(np.fft.fftfreq(nfft, 1 / fs)) + carrier
+        if frequency.shape != dump["f_hz"].shape or not np.allclose(
+            frequency, dump["f_hz"], rtol=1e-12, atol=1e-9
+        ):
+            raise ValueError("dump/result FFT grids disagree")
+        if not np.allclose(dump["ka"], 2*np.pi*abs(frequency)*SPHERE_RADIUS_M/SOUND_SPEED_M_S,
+                           rtol=1e-10, atol=1e-12):
+            raise ValueError("dump ka grid disagrees with standalone sound speed/radius")
+        if len(source["signal"]) > nfft:
+            raise ValueError("result record is shorter than the standalone source")
+        incident = np.fft.fftshift(np.fft.fft(source["signal"], nfft))
+        # Compare unit-L2 COMPLEX spectra: only a real positive amplitude ratio
+        # is ignored. No phase rotation, delay, or complex-gain fit is allowed.
+        dumped_incident = dump["S_in_complex"]
+        if dumped_incident.shape != incident.shape or not np.isfinite(dumped_incident).all():
+            raise ValueError("invalid incident spectrum in dump")
+        incident_norm = np.linalg.norm(incident)
+        dumped_norm = np.linalg.norm(dumped_incident)
+        if not np.isfinite(incident_norm) or not np.isfinite(dumped_norm) or min(incident_norm, dumped_norm) <= 0:
+            raise ValueError("incident spectra must be finite and nonzero")
+        source_scale = float(dumped_norm / incident_norm)
+        source_error = np.linalg.norm(incident/incident_norm - dumped_incident/dumped_norm)
+        if source_error > 1e-10:
+            raise ValueError(
+                f"incident spectra differ in shape or phase (normalized L2={source_error:.3e}); "
+                "only a positive amplitude scale is allowed"
+            )
+        ping_index = int(OPENSTB_ECHO_PING_INDEX)
+        receiver_index = int(OPENSTB_ECHO_RECEIVER_INDEX)
+        if not (
+            0 <= ping_index < pressure.shape[0]
+            and 0 <= receiver_index < pressure.shape[1]
+        ):
+            raise ValueError("selected ping/receiver index is out of range")
+        if (angles.shape != pressure.shape[:2] or not np.isfinite(angles).all()
+                or np.any(angles < 0) or np.any(angles > np.pi)):
+            raise ValueError("invalid per-ping/receiver scattering-angle table")
+        theta = float(angles[ping_index, receiver_index])
+        delay = float(travel_times[ping_index, receiver_index])
+        delay_origin = "per-ping/receiver travel-time table in results"
+        if not np.isfinite(delay) or not 0 <= delay < t[-1]:
+            raise ValueError("travel time is outside the recording window")
+        actual = pressure[ping_index, receiver_index]
+        if not np.isfinite(actual).all() or not np.linalg.norm(actual):
+            raise ValueError("selected echo is nonfinite or zero")
+    except (OSError, ValueError, KeyError) as error:
+        warnings.warn(f"OpenSTB echo comparison skipped: {error}", stacklevel=2)
+        return None
+
+    ka = 2 * np.pi * abs(frequency) * SPHERE_RADIUS_M / SOUND_SPEED_M_S
+    # Rigid plugin uses |physical f| on the full grid, without conjugation.
+    # Evaluate at the plugin threshold to match its DC convention.
+    ff = compute_form_function(np.maximum(ka, KA_EPS), theta=theta,
+                               n_terms=N_TERMS, ka_eps=KA_EPS)
+    spectrum = incident * float(dump["scale"]) * ff
+    spectrum *= np.exp(-2j * np.pi * frequency * delay)
+    spectrum *= reflectivity
+    predicted = np.fft.ifft(np.fft.ifftshift(spectrum))[: t.size]
+    predicted_peak = np.max(abs(predicted))
+    actual_peak = np.max(abs(actual))
+    if not np.isfinite(predicted).all() or predicted_peak <= 0:
+        warnings.warn("OpenSTB echo comparison skipped: reference echo is nonfinite or zero",
+                      stacklevel=2)
+        return None
+    # Positive real peak normalization preserves the phase of every complex sample.
+    # Do not scale the incident signal or alter the independently synthesized echo.
+    predicted_shape = predicted / predicted_peak
+    actual_shape = actual / actual_peak
+    relative = np.linalg.norm(predicted_shape - actual_shape) / np.linalg.norm(actual_shape)
+    max_error = np.max(abs(predicted_shape - actual_shape))
+    print(f"\nOpenSTB echo comparison: {results_path}")
+    print(f"  Ping {ping_index} (t={pings[ping_index]:g} s), receiver {receiver_index}")
+    print(f"  Scattering angle={theta:.12g} rad (from result metadata)")
+    print(f"  Delay={delay:.12g} s from {delay_origin}; no peak/gain fitting")
+    print("  Uses stored single-target reflectivity; assumes no extra distortions.")
+    print(
+        f"  Source normalized L2={source_error:.3e}; normalized echo complex relative L2={relative:.3e}"
+    )
+    print(f"  Source positive amplitude ratio (OpenSTB/standalone)={source_scale:.9g}")
+    print(f"  Echo maxima before normalization: OpenSTB={actual_peak:.9g}, standalone={predicted_peak:.9g}")
+    print(f"  Normalized echo maximum complex-sample error={max_error:.3e}")
+    print("  Shape/phase comparison only: absolute pressure agreement is NOT tested.")
+    time_relative = (t - delay) * 1e3
+    modulation = np.exp(2j * np.pi * carrier * t)
+    fig, (ax_time, ax_error) = plt.subplots(2, 1, figsize=(11, 7))
+    ax_time.plot(time_relative, (actual_shape * modulation).real, label="OpenSTB echo / its complex peak magnitude")
+    ax_time.plot(
+        time_relative,
+        (predicted_shape * modulation).real,
+        "--",
+        label="Standalone echo / its complex peak magnitude",
+    )
+    ax_time.set(
+        title=(
+            f"Rigid sphere — OpenSTB vs standalone echo, ping {ping_index}, receiver {receiver_index}\n"
+            "Each echo normalized by its complex peak magnitude; time minus known travel delay"
+        ),
+        xlabel="Time minus calculated travel time [ms]",
+        ylabel="Normalized pressure",
+    )
+    ax_error.plot(time_relative, abs(predicted_shape - actual_shape))
+    ax_error.set(
+        title="Difference between normalized complex echoes (phase preserved)",
+        xlabel="Time minus calculated travel time [ms]",
+        ylabel="Normalized absolute error",
+    )
+    # A band-limited response has long tails: do not let tiny ringing force a
+    # full-record view that hides the principal packets. Metrics still use ALL samples.
+    window = OPENSTB_ECHO_PLOT_WINDOW_MS
+    if window is None:
+        target_time = SPHERE_RADIUS_M / SOUND_SPEED_M_S
+        window = (
+            -4 * target_time * 1e3,
+            (float(source["duration_s"]) + 20 * target_time) * 1e3,
+        )
+    for ax in (ax_time, ax_error):
+        ax.set_xlim(*window)
+    ax_time.legend()
+    for ax in (ax_time, ax_error):
+        ax.grid(alpha=0.3)
+    fig.tight_layout()
+    return dict(
+        complex_relative_l2=float(relative),
+        max_absolute_error=float(max_error),
+        source_relative_l2=float(source_error),
+        source_positive_scale=source_scale,
+        normalization="complex_peak_magnitude",
+        delay_s=delay,
+        ping_index=ping_index,
+        receiver_index=receiver_index,
+        scattering_angle_rad=theta,
+    )
+
 
 
 def main() -> None:
@@ -545,6 +754,8 @@ def main() -> None:
         plot_rudgers_validation(source, result)
     if COMPARE_OPENSTB_DUMP:
         compare_openstb_dump()
+    if COMPARE_OPENSTB_ECHO:
+        compare_openstb_echo(source)
     plt.show()
 
 

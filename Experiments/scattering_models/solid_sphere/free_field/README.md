@@ -226,7 +226,12 @@ magnitude versus Eq. (16), and the phase parameter used for paper comparison.
 Eq. (14), only when `SHOW_VALIDATION_PLOTS` is enabled. These diagnostics are
 skipped for `tone_burst` and `lfm_chirp`; there is no matching Hickling reference
 echo for those general settings. Set `SHOW_VALIDATION_PLOTS = False` for just the
-three normal figures.
+three normal figures only if the two OpenSTB comparison options are also disabled.
+There are four controls in total: `SHOW_VALIDATION_PLOTS`,
+`COMPARE_DIRECT_HICKLING`, `COMPARE_OPENSTB_DUMP`, and `COMPARE_OPENSTB_ECHO`.
+With all applicable options enabled and compatible files available, the Hickling
+case produces nine figures; LFM/tone burst produce six, since the three
+Hickling-specific diagnostics are deliberately skipped.
 
 ### Reference equations
 
@@ -262,6 +267,92 @@ one for comparison with Hickling's phase plot.
 
 ## 6. Validation status and limitations
 
+### Optional comparison with an OpenSTB form-function dump
+
+`COMPARE_OPENSTB_DUMP = True` independently enables two additional figures, one
+for the Hickling convention and one for the conjugated OpenSTB convention.
+Each overlays magnitude and wrapped phase from the plugin dump and a standalone
+recomputation. `OPENSTB_DUMP` points by default to
+`Experiments/simple_points_study/solid_sphere_ff_debug.npz`.
+
+The comparison uses the dump's physical-frequency/ka grid, sound speed, radius,
+material and fluid properties, modal count and ka threshold. It does not change
+the selected source/material used by the normal standalone figures. It compares
+raw form functions before scale and the frequency mask, not the final echo or
+absolute received pressure. Reported metrics are relative complex L2 error,
+relative magnitude L2 error, and wrapped-phase RMS excluding negligible response.
+The two phase plots must be compared within their respective conventions.
+
+The option is independent of `SHOW_VALIDATION_PLOTS` and works for any selected
+source. A missing or incompatible dump is reported and skipped. Set both
+`COMPARE_OPENSTB_DUMP = False` and `COMPARE_OPENSTB_ECHO = False` to run without
+reading external simulation files.
+Keep the historical standalone unchanged. Final-echo comparison is not part of
+this option.
+
+### Optional comparison with the final OpenSTB echo
+
+`COMPARE_OPENSTB_ECHO = True` reads `OPENSTB_RESULTS` (repository-root
+`simple_points.npz` by default) and the solid dump. Unlike the form-function-only
+comparison, the selected standalone source and material must match the run.
+Select `OPENSTB_ECHO_PING_INDEX` and `OPENSTB_ECHO_RECEIVER_INDEX` (both default
+to zero). The corresponding echo and travel time are selected together. The
+comparison supports one target and multiple pings/receivers, with no additional
+distortions.
+
+The standalone independently builds the incident spectrum on the actual simulation
+FFT grid, recomputes its modal response, conjugates it, applies the same mask and
+scale, and includes the known travel-time phase. It compares the recorded portion
+of the resulting complex echo without peak alignment or phase rotation. Before
+accepting a comparison, the two incident spectra are divided by their own L2 norms
+and checked as complex arrays: only a real positive amplitude ratio may differ.
+Changes of sign, phase, delay or spectral shape are not corrected or accepted.
+
+Each complex echo is then divided by its own maximum complex magnitude, preserving
+every sample's phase. The figure shows the real passband views of those normalized
+echoes versus time minus the known travel delay, and their normalized complex error.
+Metrics use the full normalized complex record, not only the visible time window.
+This tests shape and phase, **not absolute pressure**. Original sources, modal
+functions and echo synthesis are unchanged; normalization is comparison-only.
+The source amplitude ratio and pre-normalization echo maxima are printed for clarity.
+This is a discrete-pipeline comparison, separate from the direct Hickling integral.
+
+Source spectrum, modal parameters, carrier, sampling and validation-band compatibility
+are checked. Incompatible or missing inputs are reported and skipped. This is not
+a general detector of stale results: the user must ensure that result and dump
+belong to the same controlled run. Stored transmitter/common distortion names
+are also checked; only the solid-sphere distortion is expected.
+
+In `simple_points_study/simulate.py`, `config["save_echo_metadata"] = True`
+requests a single-target travel-time table calculated by the configured travel-time
+plugin for every ping and receiver. The NumPy converter writes
+`echo_travel_time_s` with dimensions `(ping, channel)` and
+`echo_target_reflectivity` alongside the pressure. This is opt-in in the general
+controller and explicitly rejects multi-target scenes when enabled.
+The controller also exports `echo_scattering_angle_rad` for each ping/receiver.
+The rigid comparison uses that angle. The present solid far-field model remains
+specialized to backscatter, with the angular factor fixed to `(-1)**n`; it does
+not yet use these angles for a general bistatic response.
+
+The standalone no longer contains `OPENSTB_ECHO_GEOMETRY` or a fallback delay.
+It uses this result table and stored reflectivity, not the representative dump's
+delay, even when selecting a different ping. If the result lacks these metadata,
+the last comparison is skipped with a warning to rerun `simulate.py`; other
+figures still work. No rerun or migration of an old result happens automatically.
+
+For the October 2026 controlled Armco iron / five-cycle Hickling run, the existing
+legacy geometry gave a 57.2228 ms delay and complex relative echo error about
+`1.01e-14` (maximum absolute error `2.40e-15` Pa). This validates that particular
+integration baseline, not Doppler/attenuation or other source cases. Set
+`COMPARE_OPENSTB_ECHO = False` to disable this external-results comparison.
+
+With the normalized-shape comparison, the stored solid LFM run (20 ms, 0.5–10 kHz,
+Hann, ping 30/receiver 0) produced a source-shape error `5.82e-16` and normalized
+complex echo relative error `1.33e-15`. Its OpenSTB/standalone source amplitude
+ratio was approximately 12757.6; this positive scale is intentionally not tested
+as an absolute-pressure match. LFM generates six figures with all applicable
+options on, since the three Hickling-specific reference figures are skipped.
+
 The October 2026 review covered Armco iron in far-field backscattering:
 
 - Sampled complex form-function values from the new and historical implementations
@@ -282,15 +373,25 @@ source record; sufficient record duration also matters for avoiding circular
 overlap of long response tails. Nonfinite modal values are replaced by zero in the
 inherited implementation; finite output alone does not prove numerical accuracy.
 
-The standalone has OpenSTB-compatible Fourier organization, but does not yet
-validate a solid-sphere OpenSTB plugin. That integration is the next milestone.
-Its controlled comparison must match source phase, sampling, physical-frequency
-grid, material, geometry, and any frequency mask. A reference-band mask must not
-be mistaken for an intrinsic band limit of the sphere.
+The `SolidSphereFormFunction` OpenSTB plugin is implemented and the controlled
+Armco iron baseline has been checked with the Hickling source and with LFM.
+The LFM integration check above validates normalized shape/phase against the
+independent standalone; it is not an independent published chirp reference or
+an absolute-pressure calibration. Additional OpenSTB effects have not yet been
+validated in this workflow. A reference-band mask must not be mistaken for an
+intrinsic band limit of the sphere.
+
+Next, test propagation/distortion effects one at a time from a recorded baseline.
+The optional echo comparison deliberately expects only the sphere distortion and
+will skip results listing additional common/transmit distortions; it is not a
+reference implementation of spreading, absorption, beampatterns or Doppler.
+Keep original pressure levels when studying effects: independent peak normalization
+removes pure gain/loss changes and therefore cannot validate attenuation by itself.
 
 Sources have unit-scale envelopes rather than calibrated source levels. Plotted
 spectra and echoes are normalized. No spreading, absorption, beampattern, Doppler,
-noise, seabed, motion, or propagation delay is included. Absolute received pressure
+noise, seabed or motion is included in the standalone target model. A known
+propagation delay is used only in the optional OpenSTB echo comparison. Absolute received pressure
 and arrival times require the corresponding OpenSTB geometry and effects.
 
 ## 7. Running the scripts

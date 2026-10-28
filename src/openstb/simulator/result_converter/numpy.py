@@ -24,6 +24,9 @@ class NumpyConverter(ResultConverter):
     * ``pressure_dimensions``: string array giving the order of dimensions in
       ``pressure``.
     * ``sample_time``: seconds since the start of its ping that each sample was captured
+    * Optional single-target metadata: ``echo_travel_time_s`` (ping, channel),
+      ``echo_target_reflectivity`` and schema/distortion information, when requested
+      through the controller's ``save_echo_metadata`` configuration.
 
     Parameters
     ----------
@@ -60,6 +63,17 @@ class NumpyConverter(ResultConverter):
             "pressure_dimensions": ["ping", "channel", "sample_time"],
             "baseband_frequency": result.attrs["baseband_frequency"],
         }
+        if "echo_travel_time_s" in result:
+            rdict.update(
+                echo_travel_time_s=result["echo_travel_time_s"][:],
+                echo_target_reflectivity=result.attrs["echo_target_reflectivity"],
+                echo_metadata_schema=result.attrs["echo_metadata_schema"],
+                echo_distortion_classes=result.attrs["echo_distortion_classes"],
+                echo_travel_time_dimensions=["ping", "channel"],
+            )
+
+        if "echo_scattering_angle_rad" in result:
+            rdict["echo_scattering_angle_rad"] = result["echo_scattering_angle_rad"][:]
 
         if self.compress:
             np.savez_compressed(self.filename, **rdict)

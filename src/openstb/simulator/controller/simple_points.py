@@ -50,6 +50,9 @@ class SimplePointConfig(TypedDict):
     #: Plugin to convert the output into a desired format.
     result_converter: NotRequired[abc.ResultConverter]
 
+    #: Save per-ping/receiver travel times for single-target echo comparisons.
+    save_echo_metadata: NotRequired[bool]
+
 
 @dataclass(slots=True, eq=False, order=False)
 class CommonSettings:
@@ -121,6 +124,49 @@ def _target_chunk_iterator(
                 count = -1
 
             yield idx, n, *target.get_chunk(n, count)
+
+
+def _store_echo_metadata(storage, config, ping_start):
+    """Optional single-target diagnostics using the configured travel-time plugin.
+
+    Calls the same calculation as each simulation task, not a fitted echo delay.
+    Kept opt-in to avoid allocating per-path diagnostics for large target scenes.
+    """
+    if sum(len(target) for target in config["targets"]) != 1:
+        raise ValueError("save_echo_metadata currently requires exactly one target")
+    target = next(target for target in config["targets"] if len(target))
+    position, reflectivity = target.get_chunk(0, 1)
+    system = config["system"]
+    tx = system.transmitter
+    times = np.empty((len(ping_start), len(system.receivers)))
+    angles = np.empty_like(times)
+    for ping, time in enumerate(ping_start):
+        for receiver, rx in enumerate(system.receivers):
+            result = config["travel_time"].calculate(
+                config["trajectory"], time, config["environment"],
+                tx.position, tx.orientation.ndarray,
+                rx.position.reshape(1, 3), rx.orientation.ndarray.reshape(1, 4),
+                position,
+            )
+            times[ping, receiver] = np.asarray(result.travel_time)[0, 0]
+            cosine = np.sum(np.asarray(result.incident_vector)[0]
+                            * np.asarray(result.scattering_vector)[0, 0])
+            angles[ping, receiver] = np.arccos(np.clip(cosine, -1, 1))
+    if not np.isfinite(times).all() or np.any(times < 0):
+        raise ValueError("Invalid travel times for echo metadata")
+    stored = storage.empty(name="echo_travel_time_s", shape=times.shape,
+                           chunks=(1, times.shape[1]), dtype="f8")
+    stored[:] = times
+    if not np.isfinite(angles).all():
+        raise ValueError("Invalid scattering angles for echo metadata")
+    stored_angles = storage.empty(name="echo_scattering_angle_rad", shape=angles.shape,
+                                  chunks=(1, angles.shape[1]), dtype="f8")
+    stored_angles[:] = angles
+    storage.attrs["echo_target_reflectivity"] = float(np.asarray(reflectivity).item())
+    storage.attrs["echo_metadata_schema"] = 1
+    storage.attrs["echo_distortion_classes"] = [
+        type(item).__name__ for item in tx.distortion + config.get("distortion", [])
+    ]
 
 
 def _point_simulation_chunk(
@@ -419,6 +465,8 @@ class SimplePointSimulation(abc.Controller[SimplePointConfig]):
         # Add some metadata.
         storage.attrs["baseband_frequency"] = self.baseband_frequency
         storage.attrs["sample_rate"] = self.sample_rate
+        if config.get("save_echo_metadata", False):
+            _store_echo_metadata(storage, config, ping_start)
 
         logger.info(
             _(

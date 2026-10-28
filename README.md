@@ -49,3 +49,17 @@ Running the simulator
 
 See the `examples/` directory for various examples of how to run the simulator. The
 documentation includes more details of these examples.
+
+Local scattering research workflows
+----------------------------------
+
+The repository also contains a controlled single-target experiment and independent
+free-field sphere standalones. Their configuration, validation scope and optional
+diagnostics are documented separately:
+
+- [Simple-points scattering experiment](Experiments/simple_points_study/README.md)
+- [Rigid-sphere standalones](Experiments/scattering_models/rigid_sphere/free_field/README.md)
+- [Solid elastic-sphere standalones](Experiments/scattering_models/solid_sphere/free_field/README.md)
+
+These are research workflows, not a validation claim for all combinations of
+platform, propagation and scattering effects.

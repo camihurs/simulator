@@ -206,6 +206,7 @@ The validation controls are:
 SHOW_VALIDATION_PLOTS = True
 COMPARE_DIRECT_RUDGERS = True
 COMPARE_OPENSTB_DUMP = True
+COMPARE_OPENSTB_ECHO = True
 ```
 
 For `rudgers_fig6`, the first option adds a comparison between:
@@ -224,6 +225,66 @@ selected source because it evaluates only the target response on the dump's `ka`
 and at its stored scattering angle.
 
 ## 5. Validation results and interpretation
+
+### Optional final-echo comparison with OpenSTB
+
+`COMPARE_OPENSTB_ECHO = True` enables one additional two-panel figure: the final
+OpenSTB echo overlaid with independently recomputed standalone FFT/IFFT pressure,
+and the normalized complex-sample difference. There are seven figures with all
+Rudgers diagnostics enabled, not nine: the solid-sphere-specific Hickling phase
+parameter and separate conjugated-convention comparison have no rigid equivalent.
+For LFM/tone burst there are five figures with compatible OpenSTB files and all
+applicable options enabled (three normal, one modal comparison, one echo comparison).
+
+Set `OPENSTB_RESULTS` to the simulation's `simple_points.npz`, and choose
+`OPENSTB_ECHO_PING_INDEX` and `OPENSTB_ECHO_RECEIVER_INDEX` (zero-based). The
+selected source, sound speed, radius and modal count must match the run. The
+comparison uses the actual simulation FFT grid and checks incident-spectrum
+shape/phase agreement with the rigid dump after independent L2 normalization.
+Only a real positive source-amplitude scale may differ; no sign, phase or timing
+adjustment is allowed. It does not use the stored output spectrum as its
+reference or fit gain/peak timing.
+
+With `config["save_echo_metadata"] = True`, the single-target experiment stores
+`echo_travel_time_s`, `echo_scattering_angle_rad` (both ping × channel), and target
+reflectivity in the final result. The reference uses the selected path's angle
+and delay, not the representative dump angle. The rigid formula is already in
+the OpenSTB convention: no conjugation or positive-frequency mask is added.
+The plot subtracts the known travel time from its time axis; metrics compare
+complex echoes independently normalized by their maximum complex magnitude over
+the full recorded trace. The normalization preserves phase; it tests shape/phase,
+not absolute pressure. No source or modal synthesis is changed. The source
+amplitude ratio and original echo maxima are printed separately. Only the controlled
+single-target case without additional distortions is covered.
+
+OpenSTB's LFM source uses `rms_spl=190` and `rms_after_window=True` in the current
+experiment, while the standalone uses a unit-envelope chirp. The current OpenSTB
+implementation computes that RMS over the complete sampled record, including zeros.
+This explains a positive source-amplitude ratio without a shape difference; the
+normalized comparison intentionally ignores that scale and reports it separately.
+Do not use normalized-shape agreement to claim calibrated pressure agreement.
+
+Tone and chirp comparisons are covered by automated tests with distinct path
+angles/delays. The existing numerical handling differs at very small nonzero ka:
+the plugin cleans nonfinite contributions per mode, while the standalone cleans
+the final sum. A synthetic chirp echo difference around `5.9e-10` was observed;
+the focused normalized-echo regression tolerance is `1e-8`. No modal equations
+were changed to force agreement. This is not a general convergence guarantee.
+
+For subsequent effects studies, preserve a baseline and original pressure levels.
+The optional comparison expects the sphere alone and skips results that list
+additional common/transmit distortions. Independent normalization hides pure
+gain/loss, so it is insufficient to validate spreading or absorption.
+
+Older result files without the angle/travel-time tables cause this comparison
+to be skipped with a rerun warning. Other figures continue to work. Regenerate
+the simulation once after installing these metadata changes; do not manually
+enter geometry in the standalone. The historical standalone remains unchanged.
+
+The standalone's Rudgers Eq. (8) figure compares two internally calculated
+echoes, not an OpenSTB dump: complex-source FFT/IFFT and numerical integration
+of the real-source reference expression. Their known source-related differences
+remain, as explained below.
 
 ### 5.1 Form function
 

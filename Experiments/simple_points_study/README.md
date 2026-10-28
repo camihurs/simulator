@@ -28,90 +28,190 @@ convert the output to a MATLAB file if you prefer. See the `plot_results.py` scr
 for examples of how to load and plot the NumPy-formatted simulation results.
 
 
-## Paper Validation Workflow
+## Controlled sphere-scattering workflow
 
-This section describes a reproducible workflow to validate the rigid-sphere reference case used in the paper baseline.
+This experiment now supports rigid and solid elastic spheres in free field.
+The validated baseline keeps all unrelated effects disabled. Source, scattering
+model and diagnostic selection are distinct settings; changing one does not
+automatically change the others.
 
-### Objective
+### Files and responsibilities
 
-The validation mode is:
+| File | Responsibility |
+| --- | --- |
+| `shared_params.py` | Environment, sphere properties, source mode, debug paths/styles and selected diagnostic ping/receiver. |
+| `signal_factory.py` | Builds OpenSTB sources; it does not calculate scattering. |
+| `simulate.py` | Selects active plugins, geometry, trajectory, travel-time model, sampling and output paths. |
+| `debug_plots.py` | Visualizes OpenSTB results and modal dumps; does not import standalones. |
+| [Rigid analytic standalone](../scattering_models/rigid_sphere/free_field/README.md) | Independent target/source synthesis and optional OpenSTB comparisons. |
+| [Solid analytic standalone](../scattering_models/solid_sphere/free_field/README.md) | Independent elastic modal solution, Hickling diagnostics and optional OpenSTB comparisons. |
+| [Geometry viewer](VISUALIZATION.md) | Separate interactive geometry/beampattern inspection workflow. |
 
-1. Incident signal: sine burst.
-2. Scattering model: rigid sphere form function.
-3. Keep extra effects disabled unless explicitly testing them.
+Historical standalone scripts are preserved. Select `SOURCE_CASE` separately in
+each analytic standalone; this does not read the source selection from
+`shared_params.py`.
 
-Relevant files:
+### Select a baseline
 
-1. shared_params.py
-2. signal_factory.py
-3. simulate.py
-4. debug_plots.py
-5. plot_results.py
+| Baseline | Source mode in shared parameters | Active distortion | Sound speed | Standalone source |
+| --- | --- | --- | --- | --- |
+| Rudgers rigid reference | `sine`, 2 cycles, unit amplitude | `RigidSphereFormFunction` only | 1480 m/s | `rudgers_fig6` |
+| Hickling solid reference | `hickling`, k0a=24.5, 5 cycles | `SolidSphereFormFunction` only | 1410 m/s | `hickling_fig16_max` |
+| Solid LFM baseline | `lfm` | `SolidSphereFormFunction` only | 1410 m/s for the current validated case | `lfm_chirp` |
+| Rigid LFM baseline | `lfm` | `RigidSphereFormFunction` only | Match the rigid standalone | `lfm_chirp` |
 
-### Paper Validation Mode
+Use radius 0.25 m and the matching modal settings. Solid baseline material is
+Armco iron (density 7700 kg/m³, compressional speed 5960 m/s, shear speed 3240 m/s),
+with fluid density 1000 kg/m³. Named presets are documented in the solid guide.
 
-#### Step 1: Set the incident signal to sine
+In `simulate.py`, enable **only one sphere distortion**. Stacking the two
+multiplies their responses; it does not simulate separate rigid/solid targets.
+For the controlled baseline use a single target, reflectivity 1, stop-and-hop,
+identity transducer orientation, and disabled transmit/receive beampatterns.
+Disable spreading, absorption and Doppler.
 
-In shared_params.py, set signal mode to `sine`.
+Hickling source parameters live under `SIM_PARAMS["signal"]["hickling"]`.
+Its initial phase is derived to match the standalone's pulse-centered convention.
+The solid plugin receives the optional validation band `10 <= ka <= 40` only
+when mode is `hickling`; LFM has no such reference-band restriction. This band
+is not an intrinsic cutoff of the sphere.
 
-Parameters `n_cycles`, `amplitude`, and `initial_phase` are used only in sine mode through signal_factory.py.
+Current LFM settings in `signal_factory.py`: 0.5–10 kHz, 20 ms, Hann window,
+reference/carrier 5.25 kHz, 190 dB re 1 µPa and RMS-after-window scaling.
+The controller is sampled at 30 kHz for LFM and `10*f0` for the tone cases.
+Its record length follows the ping interval plus a guard region, not the
+standalone's fixed FFT length.
 
-#### Step 2: Keep only rigid-sphere distortion for the baseline
+### Output files and execution
 
-In simulate.py:
+Run from the repository root with the project environment:
 
-1. Keep `RigidSphereFormFunction` enabled.
-2. Disable `geometric_spreading` and `anslie_mccolm_attenuation` for the strict paper baseline.
-3. If you want pure baseline behavior, also disable transducer beampattern effects or use omnidirectional transducers.
+```powershell
+.venv\Scripts\python.exe Experiments\simple_points_study\simulate.py
+.venv\Scripts\python.exe Experiments\simple_points_study\debug_plots.py
+```
 
-#### Step 3: Keep simple geometry
+Both `simple_points.npz` and the intermediate `simple_points.zarr` are relative
+to the working directory of the simulation. Existing output paths are rejected:
+move, rename or remove only the intended old outputs before rerunning.
+Successful NumPy conversion automatically removes the intermediate Zarr directory;
+a failed run may leave it behind. No simulation is triggered by diagnostics.
 
-Use the single point target configuration in simulate.py, and keep ping interval/sampling settings stable while validating.
+Modal dumps have explicit independent paths under this experiment:
+`rigid_sphere_ff_debug.npz` and `solid_sphere_ff_debug.npz`.
+There is no need to delete the other model's dump, but each comparison must read
+the correct file from the intended run. Dumps contain a representative chunk,
+not all pings. Several Dask workers may write the same dump, so it is not
+guaranteed to describe the first ping.
 
-### Run Order
+### Per-ping metadata
 
-1. Run simulation:
-   `python simulate.py`
-2. Quick result check:
-   `python plot_results.py`
-3. Detailed diagnostics:
-   `python debug_plots.py`
+This experiment enables `config["save_echo_metadata"] = True`. For exactly one
+target, the controller uses its configured travel-time plugin to record:
 
-### What to Check in Debug Plots
+- `echo_travel_time_s`: shape (ping, channel), in seconds;
+- `echo_scattering_angle_rad`: the corresponding path angles;
+- `echo_target_reflectivity`: the single target's reflectivity;
+- schema, dimension labels and common/transmit distortion class names.
 
-1. **Incident signal consistency**
-   - Incident time-domain plots are reconstructed from the same signal definition used by the simulation.
-   - Incident spectrum views are available in `ka` and in Hz.
+These are exported alongside pressure in `simple_points.npz`. This opt-in
+diagnostic currently rejects multi-target scenes rather than ambiguously
+attaching one travel time to a sum of targets.
 
-2. **Form function consistency**
-   - Form function plots are loaded from the plugin debug dump produced by `RigidSphereFormFunction`.
-   - A zoomed `ka` view is useful for paper comparison.
-   - A full-range `ka` view is useful to verify the complete computed band.
+Each standalone selects `OPENSTB_ECHO_PING_INDEX` and
+`OPENSTB_ECHO_RECEIVER_INDEX` independently of the diagnostic indices in
+`shared_params.py`. It uses the selected stored travel time; the rigid
+comparison also uses the stored scattering angle. No manual geometry fallback
+remains. Old files missing required metadata cause only the optional echo
+comparison to be skipped with an explanation.
 
-3. **Echo consistency**
-   - Echo time-domain plot should be finite and non-zero.
-   - Echo spectrum can be inspected in `ka` and in Hz.
+Backscatter is theta=pi under the vector convention used here. The rigid
+response is angular; the present solid far-field implementation instead fixes
+the backscatter factor to `(-1)**n`. General solid-sphere bistatic scattering
+is future work, not validated by changing the geometric target position.
 
-### Notes on Debug Parameters
+### Diagnostic model and presentation
 
-1. `incident_fft_points`
-   - Used by incident spectrum plotting in debug_plots.py.
-   - Not specific to sine; it works for sine and chirp.
+Under `SIM_PARAMS["debug"]`, select:
 
-2. `form_function_ka_max`
-   - In the current script state, this value is not actively controlling axes unless explicitly wired into plotting limits.
-   - Current `ka` limits are defined directly in plotting code.
+```python
+"target_model": "solid",  # "solid" or "rigid"; must match the run
+"plot_style": "screen",  # "screen" or "paper"
+"ping_index": 31,
+"receiver_index": 0,
+```
+
+Styles change titles, fonts and dimensions only; they do not require rerunning
+the simulation. `screen_style` and `paper_style` customize them; paper hides
+titles by default. The rigid focused and full-range modal views are retained.
+Solid modal figures distinguish raw Hickling phase, conjugated OpenSTB phase,
+the reference-band shading if present, and the unwrapped Hickling phase parameter.
+
+Incident diagnostics reconstruct the full controller record including guard
+samples before cropping for time plots. This matters because the current
+OpenSTB LFM implementation calculates RMS over the full sampled array including
+zeros: resampling on a shorter plotting interval changes the source amplitude.
+
+Physical frequencies and their FFT coefficients are sorted together before ka
+plotting. Weak spectral phase is omitted below a configurable relative threshold
+(`incident_phase_min_relative`, default 1e-3, or -60 dB); wrap jumps are not joined.
+Dense in-band chirp phase is still expected. The Hz spectral figures are
+recomputed using the OpenSTB complex FFT procedure, not read directly from the dump.
+The ka view preserves the historical doubled real-tone FFT for the rigid sine case;
+chirps use complex baseband FFT and physical frequencies for either target.
+
+`incident_fft_points` controls the ka display FFT, never truncating the source
+record. The incident Hz view uses the actual record+guard length.
+`solid_form_function_ka_max` sets the solid display limit; the rigid views retain
+their focused ka<=14 and full-range axes.
+
+### Independent standalone comparisons
+
+Enable `COMPARE_OPENSTB_DUMP` to compare modal values and
+`COMPARE_OPENSTB_ECHO` to compare the final echo. The standalone guides describe
+the reference-paper options and expected figure counts.
+
+For echo comparison, the independently constructed source must match the dump
+in complex shape and phase. A real positive amplitude ratio is allowed, because
+the standalones have unit-envelope chirps whereas OpenSTB uses calibrated RMS
+scaling. Each complex echo is normalized by its own maximum complex magnitude.
+Known travel delay is retained in synthesis and subtracted from the plotting axis;
+no peak, phase or complex gain is fitted. The result validates normalized shape
+and phase, **not absolute pressure or attenuation**.
+
+The controlled solid Hickling and LFM baseline comparisons have passed.
+The latest solid LFM result gave normalized complex relative error about
+1.33e-15; this is implementation agreement, not independent published chirp
+validation. Latest regression suite: 114 tests passed. Test scope and numerical
+limitations are described in the model guides.
+
+### Next: additional OpenSTB effects
+
+Keep a controlled baseline, then enable one effect at a time and record its
+configuration, raw amplitudes, spectra and timing. Only then combine effects.
+Do not alter modal equations to force an effect-enabled echo to match the
+target-only standalone.
+
+The current optional echo comparisons expect only the selected sphere distortion
+in the common/transmit chain and skip results listing extra effects. They are not
+independent references for those effects. Receive-only effects are not fully
+identified by that class-name check: manually verify the receive beampattern too.
+A future effects-comparison workflow may need separate baseline/effect result
+files and additional metadata; it has not been implemented yet.
+
+Normalization hides pure gain/loss. Use original pressures to study spreading,
+absorption or source levels. Preserve the same source record/sampling when
+comparing amplitudes, since LFM RMS scaling currently depends on record length.
+For beampatterns verify geometry/orientation and for Doppler inspect frequency
+and timing changes, not only peak-normalized waveform resemblance.
 
 ### Troubleshooting
 
-1. **Empty pressure array or blank plots**
-   - Usually caused by echo arrival outside the simulated time window.
-   - Check ping interval, target range, and effective trace duration.
-
-2. **Very small change when enabling attenuation**
-   - Expected at short ranges and low frequencies.
-   - Increase range if you want attenuation to become clearly visible.
-
-3. **Different behavior from paper baseline**
-   - Verify extra distortions (spreading, attenuation, beampattern) are disabled.
-   - Verify signal mode is `sine` in shared_params.py.
+- Missing final comparison: inspect its warning for absent metadata/dump, wrong
+  model, mismatched source/sampling, or extra distortions.
+- LFM gives fewer standalone figures than Hickling/Rudgers: reference-only
+  diagnostics are intentionally skipped; True does not make them applicable.
+- Echo absent: check that its travel time lies within the recording window.
+- Rerun cannot start: check both final NPZ and intermediate Zarr output paths.
+- Result and dump can become stale independently; filenames alone do not prove
+  that they came from the same run.

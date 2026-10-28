@@ -46,6 +46,18 @@ def simulation_sample_rate(sample_time, signal_f0):
     return configured
 
 
+def reconstruct_simulation_source(signal, sample_rate, sample_time, carrier):
+    """Sample on the controller's Ns+guard grid, before any diagnostic padding.
+
+    In particular, LFM RMS-after-window scaling depends on the entire record.
+    Sampling a shorter plotting interval would change its pressure amplitude.
+    """
+    ns = len(sample_time)
+    guard = int(np.ceil(signal.duration * 1.1 * sample_rate))
+    time = np.arange(ns + guard) / sample_rate
+    return time, signal.sample(time, carrier)
+
+
 def finish_figure():
     """Apply presentation only; never change plotted data."""
     style = SIM_PARAMS["debug"].get("plot_style", "screen")
@@ -86,9 +98,11 @@ def plot_incident_spectrum(s: np.ndarray, sample_rate_plot: float, carrier=0.0):
     n_fft = int(SIM_PARAMS["debug"].get("incident_fft_points", 16384))
     dt_plot = 1.0 / sample_rate_plot
 
-    if selected_model() == "solid":
-        incident_fft = np.fft.fft(s, max(n_fft, len(s))) * dt_plot
-        n_fft = max(n_fft, len(s))
+    n_fft = max(n_fft, len(s))
+    if selected_model() == "solid" or carrier != 0:
+        # Physical-frequency view of a complex baseband source (including LFM
+        # for either target). Preserve the historical rigid real-tone view below.
+        incident_fft = np.fft.fft(s, n_fft) * dt_plot
     else:
         incident_fft = 2 * np.fft.fft(np.real(s), n_fft) * dt_plot
 
@@ -96,6 +110,9 @@ def plot_incident_spectrum(s: np.ndarray, sample_rate_plot: float, carrier=0.0):
     positive = freq >= 0
     freq_positive = freq[positive]
     incident_fft_positive = incident_fft[positive]
+    order = np.argsort(freq_positive)
+    freq_positive = freq_positive[order]
+    incident_fft_positive = incident_fft_positive[order]
 
     c_plot = SIM_PARAMS["environment"]["sound_speed_ms"]
     a = model_radius()
@@ -105,6 +122,16 @@ def plot_incident_spectrum(s: np.ndarray, sample_rate_plot: float, carrier=0.0):
 
     magnitude = np.abs(incident_fft_positive)
     phase = np.mod(np.angle(incident_fft_positive) + 2.0 * np.pi, 2.0 * np.pi)
+    threshold = float(SIM_PARAMS["debug"].get("incident_phase_min_relative", 1e-3))
+    if not 0 < threshold <= 1:
+        raise ValueError("incident_phase_min_relative must be in (0, 1]")
+    # Phase near zero spectral magnitude is not informative. NaNs also prevent
+    # lines connecting across excluded bands and across wrapped-phase jumps.
+    phase[magnitude < magnitude.max()*threshold] = np.nan
+    if not magnitude.max():
+        phase[:] = np.nan
+    jumps = np.r_[False, np.abs(np.diff(phase)) > np.pi]
+    phase[jumps] = np.nan
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
 
@@ -122,7 +149,10 @@ def plot_incident_spectrum(s: np.ndarray, sample_rate_plot: float, carrier=0.0):
     ax2.plot(ka_positive, phase, "k-", linewidth=1.5)
     ax2.set_xlabel("ka", fontsize=38)
     ax2.set_ylabel(r"$\angle g(ka)\ \mathrm{(rad)}$", fontsize=38)
-    ax2.set_title("Incident-signal spectrum vs ka: wrapped phase")
+    ax2.set_title(
+        "Incident-signal spectrum vs ka: wrapped phase\n"
+        f"Shown where magnitude ≥ {20*np.log10(threshold):g} dB relative to peak; wrap jumps not connected"
+    )
     ax2.tick_params(axis="x", labelsize=34)
     ax2.tick_params(axis="y", labelsize=34)
     # ax2.set_ylabel("Phase of g(ka) (radians)")
@@ -145,12 +175,10 @@ def plot_incident_spectrum_hz(
     sample_time: np.ndarray,
 ):
     # Match simple_points controller logic: Ns + guard band, complex FFT, fftshift.
-    Ns = len(sample_time)
-    gb = int(np.ceil(signal.duration * 1.1 * sample_rate))
-    nfft = Ns + gb
-
-    t = np.arange(nfft) / sample_rate
-    s = signal.sample(t, baseband_frequency)
+    t, s = reconstruct_simulation_source(
+        signal, sample_rate, sample_time, baseband_frequency
+    )
+    nfft = len(t)
 
     S = np.fft.fftshift(np.fft.fft(s))
     f = np.fft.fftshift(np.fft.fftfreq(nfft, 1.0 / sample_rate)) + baseband_frequency
@@ -413,9 +441,11 @@ def main():
         # used to generate the echoes in simple_points.npz.
         results = np.load(results_path())
         t_sim = results["sample_time"]
-        s_sim = signal.sample(t_sim, sim_baseband_frequency)
-
         fs_sim = simulation_sample_rate(t_sim, f0)
+        _, source_full = reconstruct_simulation_source(
+            signal, fs_sim, t_sim, sim_baseband_frequency
+        )
+        s_sim = source_full[:len(t_sim)]
         if f0 is not None:
             print(
                 f"Simulation-grid incident sampling: fs={fs_sim:.1f} Hz, f0={f0:.1f} Hz, samples/cycle={fs_sim / f0:.3f}"
@@ -468,7 +498,7 @@ def main():
         finish_figure()
 
         if SIM_PARAMS["debug"].get("plot_incident_spectrum", False):
-            plot_incident_spectrum(s_sim, fs_sim, sim_baseband_frequency)
+            plot_incident_spectrum(source_full, fs_sim, sim_baseband_frequency)
             plot_incident_spectrum_hz(
                 signal=signal,
                 sample_rate=fs_sim,
@@ -515,7 +545,10 @@ def main():
         finish_figure()
 
         # Incident signal on the same hydrophone time axis (full trace)-------------------------------------
-        incident_bb_on_echo_grid = signal.sample(t_echo, sim_baseband_frequency)
+        _, incident_full = reconstruct_simulation_source(
+            signal, fs_echo, t_echo, sim_baseband_frequency
+        )
+        incident_bb_on_echo_grid = incident_full[:len(t_echo)]
         incident_pb_on_echo_grid = np.real(
             incident_bb_on_echo_grid
             * np.exp(1j * 2.0 * np.pi * sim_baseband_frequency * t_echo)
